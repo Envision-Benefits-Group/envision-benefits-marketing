@@ -1,0 +1,162 @@
+services:
+  # Autoheal Service - automatically restarts unhealthy containers
+  autoheal:
+    image: willfarrell/autoheal:latest
+    container_name: autoheal
+    restart: always
+    environment:
+      AUTOHEAL_CONTAINER_LABEL: autoheal
+      AUTOHEAL_INTERVAL: 5
+      AUTOHEAL_START_PERIOD: 120
+      AUTOHEAL_DEFAULT_STOP_TIMEOUT: 10
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    network_mode: none
+
+  # Backend FastAPI Service
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    # container_name and ports removed for docker-rollout compatibility; Traefik handles ingress
+    env_file:
+      - .env
+    depends_on:
+      - db
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+    healthcheck:
+      test: [ "CMD-SHELL", "curl -fsS http://localhost:8000/health || exit 1" ]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 120s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.backend.rule=Host(`stage.api.yourdomain.com`)"
+      - "traefik.http.routers.backend.entrypoints=websecure"
+      - "traefik.http.routers.backend.tls.certresolver=myresolver"
+      - "traefik.http.services.backend.loadbalancer.server.port=8000"
+      # Autoheal
+      - "autoheal=true"
+    volumes:
+      - ./backend/data:/app/data  # Mounted volume for data
+      - ./backend/logs:/app/logs  # Mounted volume for logs
+    networks:
+      - traefik_network
+    restart: always
+
+  # Database Service
+  db:
+    image: postgres:17-alpine
+    container_name: postgres_db
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - traefik_network
+    restart: always
+
+  # Database Backup Service
+  db_backup:
+    image: kartoza/pg-backup:17-3.5  # Use the version matching your PostgreSQL version
+    container_name: postgres_db_backup
+    env_file:
+      - .env  # Contains database credentials and other environment variables
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASS: ${POSTGRES_PASSWORD}
+      POSTGRES_DBNAME: ${POSTGRES_DB}
+      DUMPPREFIX: "PG"
+      CRON_SCHEDULE: "0 2 * * *"  # Run daily at 2 AM
+#      REMOVE_BEFORE: 7  # Keep backups for 7 days
+    volumes:
+      - ./backups:/backups  # Mount the host backups directory
+    depends_on:
+      - db
+    networks:
+      - traefik_network  # Use your existing network
+    restart: always
+
+  # Qdrant Vector Database
+#  qdrant:
+#    image: qdrant/qdrant:v1.14.0
+#    container_name: qdrant
+#    ports:
+#      - "6333:6333"  # REST API
+#      - "6334:6334"  # gRPC API
+#    volumes:
+#      - qdrant_data:/qdrant/storage
+#    networks:
+#      - traefik_network
+#    restart: always
+#
+#  # Text Embeddings Inference Service (TEI)
+#  tei_cpu:
+#    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.7
+#    container_name: text_embeddings_cpu
+#    env_file:
+#      - .env
+#    environment:
+#      - HF_API_TOKEN=${HF_API_TOKEN}
+#      - API_KEY=${TEI_API_KEY}
+#    command: ["--model-id", "${MODEL_ID}", "--hf-api-token", "${HF_API_TOKEN}", "--api-key", "${TEI_API_KEY}", "--port", "3000", "--hostname", "0.0.0.0", "--auto-truncate"]
+#    ports:
+#      - "8081:3000"                              # Expose the service on port 8081
+#    volumes:
+#      - tei_data:/data                           # Optional: persists model weights
+#    networks:
+#      - traefik_network
+#    restart: always
+
+  # Frontend Next.js Service
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+        NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY}  # Pass Stripe key during build
+    container_name: nextjs_frontend
+    env_file:
+      - .env
+    depends_on:
+      - backend
+    healthcheck:
+      test: [ "CMD-SHELL", "curl -fsS http://localhost:3000/ || exit 1" ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    ports:
+      - "3000:3000"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.frontend.rule=Host(`stage.yourdomain.com`)"
+      - "traefik.http.routers.frontend.entrypoints=websecure"
+      - "traefik.http.routers.frontend.tls.certresolver=myresolver"
+      - "traefik.http.services.frontend.loadbalancer.server.port=3000"
+      # Autoheal
+      - "autoheal=true"
+    networks:
+      - traefik_network
+    restart: always
+
+volumes:
+  postgres_data:
+#  qdrant_data:   # Named volume for Qdrant data
+#  tei_data:      # Named volume for TEI data
+
+networks:
+  traefik_network:
+    driver: bridge
+    external: true

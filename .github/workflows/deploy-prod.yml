@@ -1,0 +1,51 @@
+name: Update and Deploy on EC2
+on:
+  push:
+    branches:
+      - master
+jobs:
+  deploy-on-ec2:
+    name: SSH and Docker Compose
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Remote SSH Commands
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.EC2_PUB_IP_PROD }}
+          username: ubuntu
+          key: ${{ secrets.EC2_KEY }}
+          port: 22
+          script: |
+            cd project-name/
+            
+            git checkout master
+
+            # git pull latest changes
+            git pull
+            
+            # Install docker-rollout CLI (simple zero-downtime updates)
+            sudo mkdir -p /usr/local/lib/docker/cli-plugins
+            if [ ! -x /usr/local/lib/docker/cli-plugins/docker-rollout ]; then \
+              sudo curl -fsSL -o /usr/local/lib/docker/cli-plugins/docker-rollout https://raw.githubusercontent.com/wowu/docker-rollout/main/docker-rollout && \
+              sudo chmod +x /usr/local/lib/docker/cli-plugins/docker-rollout ; fi
+
+            # Build new images for the project-name project
+            sudo docker compose -p project-name build
+
+            # Zero-downtime rollout with timeouts and wait-after-healthy
+            sudo docker rollout -p project-name -t 600 --wait-after-healthy 5 backend
+            sudo docker rollout -p project-name -t 900 --wait-after-healthy 5 frontend
+
+            # Bring up any other services and apply updates without touching healthy ones
+            sudo docker compose -p project-name up -d
+            
+            # health checks
+            make wait_for_db
+
+            # Run migrations and init data
+            sudo docker compose -p project-name exec -i backend alembic upgrade head
+
+            # Remove unused images
+            sudo docker system prune --force

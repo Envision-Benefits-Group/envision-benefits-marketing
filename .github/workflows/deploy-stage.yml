@@ -1,0 +1,37 @@
+name: Update and Deploy on EC2
+on:
+  push:
+    branches:
+      - stage
+jobs:
+  deploy-on-ec2:
+    name: SSH and Docker Compose
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Remote SSH Commands
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.EC2_PUB_IP_STAGE }}
+          username: ubuntu
+          key: ${{ secrets.EC2_KEY }}
+          port: 22
+          script: |
+            cd project-name/
+
+            sudo docker-compose -f stage.docker-compose.yml down
+            
+            git checkout stage
+
+            # git pull latest changes
+            git pull origin stage
+
+            # Rebuild and run everything
+            sudo docker-compose -f stage.docker-compose.yml up -d --build
+
+            # Run migrations and init data
+            make init
+
+            # Remove unused images
+            sudo docker system prune --force
