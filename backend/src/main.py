@@ -1,17 +1,9 @@
 import os
-from contextlib import asynccontextmanager
-
-import structlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from src.admin import router as admin_router
-from src.auth import router as auth_routers
-from src.database import engine
 from src.logging_config import setup_logging
-# # from src.scheduler import scheduler
-# from src.subscription.models import Subscription
-# from src.subscription.router import router as subscription_router
+from src.extraction import router as extraction_router
 from starlette.requests import Request
 from structlog.contextvars import (bind_contextvars, clear_contextvars)
 
@@ -20,17 +12,6 @@ os.makedirs("logs", exist_ok=True)
 
 # Configure logging
 setup_logging()
-
-# @asynccontextmanager
-# async def lifespan(app: FastAPI):
-#     # Startup code
-#     scheduler.start()
-#     print("Scheduler started")
-#     yield
-#     # Shutdown code
-#     scheduler.shutdown()
-#     print("Scheduler shutdown")
-
 
 app = FastAPI()
 
@@ -65,16 +46,12 @@ async def add_context_to_logs(request: Request, call_next):
     response = await call_next(request)
     return response
 
-
-# Include your routers
-app.include_router(auth_routers.router, tags=["Authentication"], prefix="/auth")
-app.include_router(admin_router.router, tags=["Admin"], prefix="/admin")
-
+app.include_router(extraction_router.router, tags=["Extraction"], prefix="/extraction")
 
 # Root endpoint
 @app.get("/")
 async def root():
-    return {"message": "Welcome to the FastAPI User CRUD with PostgreSQL"}
+    return {"message": "Welcome to the FastAPI"}
 
 # health check endpoint
 @app.get("/health")
