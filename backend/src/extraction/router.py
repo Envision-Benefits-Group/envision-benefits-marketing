@@ -1,18 +1,31 @@
+import os
 from datetime import datetime
 from enum import Enum
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Security, status
+from fastapi.security import APIKeyHeader
 from fastapi.responses import StreamingResponse
 from typing import Annotated, Optional
-from .service import extract_from_pdf, process_excel_report  # <--- Updated name
+from .service import extract_from_pdf, process_excel_report
 
 router = APIRouter()
 
 VALID_QUARTERS = {"Q1", "Q2", "Q3", "Q4"}
+API_KEY_NAME = "x-api-key"
+api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
 
+async def get_api_key(api_key_header: str = Security(api_key_header)):
+    expected_api_key = os.getenv("API_KEY", "test-secret-key")
+    if api_key_header == expected_api_key:
+        return api_key_header
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Could not validate credentials",
+    )
 
 @router.post("/process-pdf")
 async def process_pdf(
         file: Annotated[UploadFile, File(description="Upload the Insurance PDF")],
+        api_key: str = Security(get_api_key),
         quarter: Annotated[Optional[str], Form(description="Target Quarter (e.g., Q1, Q2, Q3, Q4)")] = None
 ):
     if file.content_type != "application/pdf":
