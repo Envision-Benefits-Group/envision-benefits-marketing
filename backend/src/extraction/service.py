@@ -4,8 +4,8 @@ from io import BytesIO
 from openai import AsyncOpenAI
 from fastapi import HTTPException
 
-from backend.src.extraction.schemas import PlanList
-from backend.src.extraction.excel_generator import ExcelReportGenerator
+from .schemas import PlanList
+from .excel_generator import ExcelReportGenerator
 
 API_KEY = os.getenv("OPENAI_API_KEY")
 
