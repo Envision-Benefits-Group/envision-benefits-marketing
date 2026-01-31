@@ -91,7 +91,7 @@ class ExcelReportGenerator:
 
             for carrier in carriers:
                 for network in network_types:
-                    self._create_sheet_for_network(writer, processed_df, carrier, network)
+                    self._create_sheet_for_network(processed_df, carrier, network)
 
         output.seek(0)
         return output
@@ -221,8 +221,20 @@ class ExcelReportGenerator:
             'text_wrap': True, 'valign': 'top', 'border': 1,
             'num_format': '0.00%'  # Displays 0.15 as 15.00%
         })
+        # Footer: Red bold disclaimer
+        self.footer_red_fmt = self.workbook.add_format({
+            'bold': True, 'font_color': '#FF0000', 'text_wrap': True
+        })
+        # Footer: Dark grey background note
+        self.footer_note_fmt = self.workbook.add_format({
+            'bold': True, 'text_wrap': True,
+            'bg_color': '#808080', 'font_color': '#FFFFFF'
+        })
 
-    def _create_sheet_for_network(self, writer, df, carrier, network):
+    # Number of Excel columns each plan spans
+    COLS_PER_PLAN = 2
+
+    def _create_sheet_for_network(self, df, carrier, network):
         subset = df[(df['carrier'] == carrier) & (df['network_type'] == network)]
         if subset.empty: return
 
@@ -241,29 +253,36 @@ class ExcelReportGenerator:
                     row_data.append(val)
                 matrix_data.append(row_data)
 
-        # Create DataFrame
-        matrix_df = pd.DataFrame(matrix_data, columns=['Plan Details'] + plans)
         sheet_name = f"{carrier[:15]} - {network}"[:30].replace("/", "")
-        matrix_df.to_excel(writer, sheet_name=sheet_name, index=False)
+        worksheet = self.workbook.add_worksheet(sheet_name)
+        self._apply_sheet_formatting(worksheet, matrix_data, plans)
 
-        self._apply_sheet_formatting(writer.sheets[sheet_name], matrix_data, len(plans), matrix_df.columns)
+    def _apply_sheet_formatting(self, worksheet, matrix_data, plans):
+        num_plans = len(plans)
+        last_col = num_plans * self.COLS_PER_PLAN  # total plan columns
 
-    def _apply_sheet_formatting(self, worksheet, matrix_data, num_plans, columns):
         worksheet.set_column(0, 0, 35)
-        worksheet.set_column(1, num_plans, 25)
+        for i in range(num_plans):
+            start_col = 1 + i * self.COLS_PER_PLAN
+            worksheet.set_column(start_col, start_col + self.COLS_PER_PLAN - 1, 18)
         worksheet.freeze_panes(1, 1)
 
-        # First pass: build idx_map so formulas can reference rows that come later
+        # First pass: build idx_map (Excel row numbers, 1-indexed)
         idx_map = {}
         for r_idx, row in enumerate(matrix_data):
-            idx_map[row[0]] = r_idx + 2
+            idx_map[row[0]] = r_idx + 2  # +1 for header row, +1 for 1-indexing
 
-        # Write column headers
-        for c_idx in range(len(columns)):
-            worksheet.write(0, c_idx, columns[c_idx], self.header_fmt)
+        # Write header row: "Plan Details" + merged plan name headers
+        worksheet.write(0, 0, 'Plan Details', self.header_fmt)
+        for i, plan_name in enumerate(plans):
+            col_start = 1 + i * self.COLS_PER_PLAN
+            col_end = col_start + self.COLS_PER_PLAN - 1
+            worksheet.merge_range(0, col_start, 0, col_end, plan_name, self.header_fmt)
 
+        # Write data rows
         for r_idx, row in enumerate(matrix_data):
             row_label = row[0]
+            excel_row = r_idx + 1  # row 0 is header
 
             is_section = all(x == '' for x in row[1:])
 
@@ -282,46 +301,75 @@ class ExcelReportGenerator:
             else:
                 base_fmt = self.cell_fmt
 
-            # --- WRITE CELLS ---
-            for c_idx, val in enumerate(row):
-                if c_idx > 0:
-                    col_letter = xl_col_to_name(c_idx)
+            # Write label column
+            worksheet.write(excel_row, 0, row_label, base_fmt)
 
-                    # Formula: Monthly Premium Total
-                    if row_label == 'Monthly Premium Total':
-                        try:
-                            r_ee = idx_map['Employee Only']
-                            r_sp = idx_map['Employee + Spouse']
-                            r_ch = idx_map['Employee + Child(ren)']
-                            r_fam = idx_map['Family']
+            # Write plan columns (each plan spans COLS_PER_PLAN columns, merged)
+            for plan_i in range(num_plans):
+                col_start = 1 + plan_i * self.COLS_PER_PLAN
+                col_end = col_start + self.COLS_PER_PLAN - 1
+                # The first column of each plan pair is the one used in formulas
+                col_letter = xl_col_to_name(col_start)
+                val = row[plan_i + 1] if plan_i + 1 < len(row) else ''
 
-                            c_ee = idx_map['Count: Employee Only']
-                            c_sp = idx_map['Count: Employee + Spouse']
-                            c_ch = idx_map['Count: Employee + Child(ren)']
-                            c_fam = idx_map['Count: Family']
+                # Formula: Monthly Premium Total
+                if row_label == 'Monthly Premium Total':
+                    try:
+                        r_ee = idx_map['Employee Only']
+                        r_sp = idx_map['Employee + Spouse']
+                        r_ch = idx_map['Employee + Child(ren)']
+                        r_fam = idx_map['Family']
 
-                            formula = (
-                                f"=({col_letter}{r_ee}*{col_letter}{c_ee}) + "
-                                f"({col_letter}{r_sp}*{col_letter}{c_sp}) + "
-                                f"({col_letter}{r_ch}*{col_letter}{c_ch}) + "
-                                f"({col_letter}{r_fam}*{col_letter}{c_fam})"
-                            )
-                            worksheet.write_formula(r_idx + 1, c_idx, formula, base_fmt)
-                            continue
-                        except KeyError:
-                            pass
+                        c_ee = idx_map['Count: Employee Only']
+                        c_sp = idx_map['Count: Employee + Spouse']
+                        c_ch = idx_map['Count: Employee + Child(ren)']
+                        c_fam = idx_map['Count: Family']
 
-                    # Formula: % Difference
-                    elif row_label == '% Difference':
-                        try:
-                            r_total = idx_map['Monthly Premium Total']
-                            r_diff = idx_map['Monthly Premium Difference']
-                            # Note: No need to multiply by 100 in formula.
-                            # Excel stores percentage as 0.15. The 'num_format': '0.00%' handles the display.
-                            formula = f"=IFERROR(({col_letter}{r_total} - {col_letter}{r_diff}) / {col_letter}{r_diff}, 0)"
-                            worksheet.write_formula(r_idx + 1, c_idx, formula, base_fmt)
-                            continue
-                        except KeyError:
-                            pass
+                        formula = (
+                            f"=({col_letter}{r_ee}*{col_letter}{c_ee}) + "
+                            f"({col_letter}{r_sp}*{col_letter}{c_sp}) + "
+                            f"({col_letter}{r_ch}*{col_letter}{c_ch}) + "
+                            f"({col_letter}{r_fam}*{col_letter}{c_fam})"
+                        )
+                        worksheet.merge_range(excel_row, col_start, excel_row, col_end, '', base_fmt)
+                        worksheet.write_formula(excel_row, col_start, formula, base_fmt)
+                        continue
+                    except KeyError:
+                        pass
 
-                worksheet.write(r_idx + 1, c_idx, val, base_fmt)
+                # Formula: % Difference
+                elif row_label == '% Difference':
+                    try:
+                        r_total = idx_map['Monthly Premium Total']
+                        r_diff = idx_map['Monthly Premium Difference']
+                        formula = f"=IFERROR(({col_letter}{r_total} - {col_letter}{r_diff}) / {col_letter}{r_diff}, 0)"
+                        worksheet.merge_range(excel_row, col_start, excel_row, col_end, '', base_fmt)
+                        worksheet.write_formula(excel_row, col_start, formula, base_fmt)
+                        continue
+                    except KeyError:
+                        pass
+
+                # Section rows: merge across all plan columns
+                if is_section:
+                    worksheet.merge_range(excel_row, col_start, excel_row, col_end, '', base_fmt)
+                else:
+                    worksheet.merge_range(excel_row, col_start, excel_row, col_end, val, base_fmt)
+
+        # --- FOOTER ROWS ---
+        last_data_row = len(matrix_data)  # 0-indexed header + data rows
+        last_col = num_plans * self.COLS_PER_PLAN
+
+        footer_row_1 = last_data_row + 1
+        footer_row_2 = last_data_row + 2
+        footer_row_3 = last_data_row + 4  # blank row gap before note
+
+        worksheet.merge_range(footer_row_1, 0, footer_row_1, last_col,
+                              'Payroll Deductions should be verified by the Employer for Accuracy.',
+                              self.footer_red_fmt)
+        worksheet.merge_range(footer_row_2, 0, footer_row_2, last_col,
+                              '** If there is no enrollment in the plan; monthly premium differences are based off Employee only cost',
+                              self.footer_note_fmt)
+        worksheet.merge_range(footer_row_3, 0, footer_row_3, last_col,
+                              'Note: To unmerge cells for renewal comparison, unmerge the right column of each plan pair '
+                              '(C, E, G, etc.). The left columns (B, D, F, etc.) hold all values and formulas.',
+                              self.footer_note_fmt)

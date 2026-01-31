@@ -38,7 +38,8 @@ async def process_pdf(
     # 2. Excel Generation (Using the class via service)
     excel_file = process_excel_report(df)
 
-    filename = f"Insurance_Matrix_{quarter}.xlsx"
+    carrier = "-".join(df['carrier'].unique()).replace(" ", "_")
+    filename = f"Insurance-{carrier}-{quarter}.xlsx"
     return StreamingResponse(
         excel_file,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
