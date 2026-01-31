@@ -166,22 +166,26 @@ class ExcelReportGenerator:
         carrier = str(row.get("carrier", "")).upper()
         plan = str(row.get("plan_name", "")).upper()
 
-        HEALTHY_NY = ("HEALTHY NY", "HNY")
-        PPO_WORD = "PPO"
-
-        if any(k in plan for k in HEALTHY_NY) or "HEALTHY NY" in carrier:
+        # Healthy NY — check first as it can appear across carriers
+        if any(k in plan for k in ("HEALTHY NY", "HNY")) or "HEALTHY NY" in carrier:
             return "HealthyNY"
 
-        if "PASSPORT PLAN NATIONAL" in carrier:
-            return "PPO"
-
+        # Univera
         if "UNIVERA" in carrier:
             return "PPO" if "ACCESS PLUS" in plan else "POS"
 
-        if any(k in carrier for k in ("HIGHMARK", "IHA", "INDEPENDENT")):
-            return "PPO" if PPO_WORD in plan else "POS"
+        # Highmark
+        if "HIGHMARK" in carrier:
+            return "PPO" if "PPO" in plan else "POS"
 
-        return "PPO" if PPO_WORD in plan else "POS"
+        # Independent Health / IHA
+        if "INDEPENDENT" in carrier or "IHA" in carrier:
+            if "PPO" in plan or "PASSPORT PLAN NATIONAL" in plan:
+                return "PPO"
+            return "POS"
+
+        # Excellus / other carriers
+        return "PPO" if "PPO" in plan else "POS"
 
     def _init_styles(self):
         # Header Style (Grey)
