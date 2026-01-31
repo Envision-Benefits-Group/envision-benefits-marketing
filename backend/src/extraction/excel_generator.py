@@ -18,13 +18,6 @@ class ExcelReportGenerator:
         'ee_children': 'Employee + Child(ren)',
         'family': 'Family',
 
-        # --- SECTION: MEMBER COUNTS (INPUTS) ---
-        'SECTION_COUNTS': 'Member Counts (Enter values below)',
-        'count_ee': 'Count: Employee Only',
-        'count_sp': 'Count: Employee + Spouse',
-        'count_ch': 'Count: Employee + Child(ren)',
-        'count_fam': 'Count: Family',
-
         # --- SECTION: CALCULATIONS ---
         'calc_total_premium': 'Monthly Premium Total',
         'input_premium_diff': 'Monthly Premium Difference',
@@ -59,7 +52,14 @@ class ExcelReportGenerator:
         'SECTION_OTHER': 'Other',
         'hsa_qualified': 'HSA Qualified',
         'creditable_coverage': 'Creditable Coverage',
-        'dependent_coverage': 'Dependent Coverage'
+        'dependent_coverage': 'Dependent Coverage',
+
+        # --- SECTION: MEMBER COUNTS (INPUTS) --- moved to bottom
+        'SECTION_COUNTS': 'Member Counts (Enter values below)',
+        'count_ee': 'Count: Employee Only',
+        'count_sp': 'Count: Employee + Spouse',
+        'count_ch': 'Count: Employee + Child(ren)',
+        'count_fam': 'Count: Family',
     }
 
     # Rows that get Currency Format ($)
@@ -115,6 +115,10 @@ class ExcelReportGenerator:
         def fmt_deduct(x):
             ind = x.get('deductible_in_ee', '')
             fam = x.get('deductible_in_fam', '')
+            ind_str = str(ind).replace('$', '').replace(',', '').strip()
+            fam_str = str(fam).replace('$', '').replace(',', '').strip()
+            if ind_str in ('0', '0.00', '') and fam_str in ('0', '0.00', ''):
+                return 'None'
             d_type = 'True Family' if x.get('in_network_deductible_type') == 'T' else 'Embedded'
             return f"{ind} / {fam} ({d_type})"
 
@@ -245,18 +249,22 @@ class ExcelReportGenerator:
         worksheet.set_column(1, num_plans, 25)
         worksheet.freeze_panes(1, 1)
 
+        # First pass: build idx_map so formulas can reference rows that come later
         idx_map = {}
+        for r_idx, row in enumerate(matrix_data):
+            idx_map[row[0]] = r_idx + 2
+
+        # Write column headers
+        for c_idx in range(len(columns)):
+            worksheet.write(0, c_idx, columns[c_idx], self.header_fmt)
 
         for r_idx, row in enumerate(matrix_data):
             row_label = row[0]
-            idx_map[row_label] = r_idx + 2
 
             is_section = all(x == '' for x in row[1:])
 
             # --- DETERMINE FORMAT ---
-            if r_idx == 0:
-                base_fmt = self.header_fmt
-            elif is_section:
+            if is_section:
                 base_fmt = self.section_fmt
             elif row_label in self.INPUT_ROWS:
                 if 'Difference' in row_label:
@@ -272,10 +280,6 @@ class ExcelReportGenerator:
 
             # --- WRITE CELLS ---
             for c_idx, val in enumerate(row):
-                if r_idx == 0:
-                    worksheet.write(0, c_idx, columns[c_idx], self.header_fmt)
-                    continue
-
                 if c_idx > 0:
                     col_letter = xl_col_to_name(c_idx)
 
