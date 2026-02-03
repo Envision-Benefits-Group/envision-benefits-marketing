@@ -34,9 +34,11 @@ Extract all health insurance plans for {target_quarter}.
 STRICT COMPLIANCE RULES:
 1. TARGET QUARTER: Extract ONLY the rates for {target_quarter}.
 2. DEDUCTIBLE TYPE: Set in_network_deductible_type and out_network_deductible_type to 'T' for True Family or 'E' for Embedded.
-3. FORMATTING: Remove 'FS' from coinsurance strings.
-4. VERBIAGE: Convert all cost descriptions like '$ after deductible' to 'Deductible then $'.
-5. RATES: Use ONLY the 'Dependent age 26' tables.
+3. OOP TYPE: Set in_network_oop_type and out_network_oop_type to 'T' for True Family or 'E' for Embedded.
+4. OOP MAX: Extract OOP Max for both In-Network (oop_max_in_ee, oop_max_in_fam) and Out-of-Network (oop_max_oon_ee, oop_max_oon_fam).
+5. FORMATTING: Remove 'FS' from coinsurance strings.
+6. VERBIAGE: Convert all cost descriptions like '$ after deductible' to 'Deductible then $'.
+7. RATES: Use ONLY the 'Dependent age 26' tables.
 """
 
     try:

@@ -43,6 +43,7 @@ class ExcelReportGenerator:
         'SECTION_OON': 'Out-of-Network Coverage',
         'deductible_oon_display': 'Deductible (OON)',
         'coinsurance_oon': 'Coinsurance (OON)',
+        'oop_oon_display': 'Out of Pocket Maximum (OON)',
 
         # --- SECTION: RX ---
         'SECTION_RX': 'Prescription Coverage',
@@ -123,9 +124,33 @@ class ExcelReportGenerator:
             return f"{ind} / {fam} ({d_type})"
 
         df['deductible_display'] = df.apply(fmt_deduct, axis=1)
-        df['oop_display'] = df['oop_max_in_ee'].astype(str) + " / " + df['oop_max_in_fam'].astype(str)
-        df['deductible_oon_display'] = df.apply(
-            lambda x: f"{x.get('deductible_oon_ee', '')} / {x.get('deductible_oon_fam', '')}", axis=1)
+
+        # In-Network OOP with type
+        def fmt_oop_in(x):
+            ee = x.get('oop_max_in_ee', '')
+            fam = x.get('oop_max_in_fam', '')
+            oop_type = 'True Family' if x.get('in_network_oop_type') == 'T' else 'Embedded'
+            return f"{ee} / {fam} ({oop_type})"
+
+        df['oop_display'] = df.apply(fmt_oop_in, axis=1)
+
+        # OON Deductible with type
+        def fmt_deduct_oon(x):
+            ee = x.get('deductible_oon_ee', '')
+            fam = x.get('deductible_oon_fam', '')
+            d_type = 'True Family' if x.get('out_network_deductible_type') == 'T' else 'Embedded'
+            return f"{ee} / {fam} ({d_type})"
+
+        df['deductible_oon_display'] = df.apply(fmt_deduct_oon, axis=1)
+
+        # Out-of-Network OOP with type
+        def fmt_oop_oon(x):
+            ee = x.get('oop_max_oon_ee', '')
+            fam = x.get('oop_max_oon_fam', '')
+            oop_type = 'True Family' if x.get('out_network_oop_type') == 'T' else 'Embedded'
+            return f"{ee} / {fam} ({oop_type})"
+
+        df['oop_oon_display'] = df.apply(fmt_oop_oon, axis=1)
         df['rx_display'] = df['rx_generic'].astype(str) + " / " + df['rx_preferred_brand'].astype(str) + " / " + df[
             'rx_non_preferred_brand'].astype(str)
 

@@ -8,6 +8,8 @@ class InsurancePlan(BaseModel):
 
     in_network_deductible_type: str = Field(description="T for True Family or E for Embedded")
     out_network_deductible_type: str = Field(description="T for True Family or E for Embedded")
+    in_network_oop_type: str = Field(description="T for True Family or E for Embedded")
+    out_network_oop_type: str = Field(description="T for True Family or E for Embedded")
 
     ee_only: Optional[float] = Field(None, description="Employee Only / Single rate")
     ee_spouse: Optional[float] = Field(None, description="Employee + Spouse rate")
@@ -31,6 +33,8 @@ class InsurancePlan(BaseModel):
     deductible_oon_ee: str = Field(description="OON Deductible Individual")
     deductible_oon_fam: str = Field(description="OON Deductible Family")
     coinsurance_oon: str = Field(description="OON Coinsurance (Remove 'FS')")
+    oop_max_oon_ee: str = Field(description="Out-of-network OOP Max Individual")
+    oop_max_oon_fam: str = Field(description="Out-of-network OOP Max Family")
     rx_generic: str = Field(description="Generic drug cost (Standardize format)")
     rx_preferred_brand: str = Field(description="Preferred Brand cost (Standardize format)")
     rx_non_preferred_brand: str = Field(description="Non-Preferred cost (Standardize format)")
