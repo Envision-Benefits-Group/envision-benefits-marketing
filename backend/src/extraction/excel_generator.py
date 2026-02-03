@@ -69,11 +69,11 @@ class ExcelReportGenerator:
         'Monthly Premium Total', 'Monthly Premium Difference'
     ]
 
-    # Rows that are User Inputs (Yellow Background)
-    INPUT_ROWS = [
+    # Rows with no special coloring (plain style)
+    NO_COLOR_ROWS = [
+        'Monthly Premium Total', 'Monthly Premium Difference', '% Difference',
         'Count: Employee Only', 'Count: Employee + Spouse',
-        'Count: Employee + Child(ren)', 'Count: Family',
-        'Monthly Premium Difference'
+        'Count: Employee + Child(ren)', 'Count: Family'
     ]
 
     # Rows that get Percent Format (%)
@@ -124,6 +124,19 @@ class ExcelReportGenerator:
             return f"{ind} / {fam} ({d_type})"
 
         df['deductible_display'] = df.apply(fmt_deduct, axis=1)
+
+        # Helper to normalize coinsurance values (0%/NaN/None/0$/0 -> "None")
+        def normalize_coinsurance(val):
+            if pd.isna(val) or val is None:
+                return 'None'
+            val_str = str(val).strip().lower()
+            # Check for various zero/empty representations
+            if val_str in ('', 'none', 'nan', 'n/a', 'na', '0', '0%', '0.0%', '0.00%', '$0', '$0.00'):
+                return 'None'
+            return val
+
+        df['coinsurance_in'] = df['coinsurance_in'].apply(normalize_coinsurance)
+        df['coinsurance_oon'] = df['coinsurance_oon'].apply(normalize_coinsurance)
 
         # In-Network OOP with type
         def fmt_oop_in(x):
@@ -213,38 +226,53 @@ class ExcelReportGenerator:
         return "PPO" if "PPO" in plan else "POS"
 
     def _init_styles(self):
-        # Header Style (Grey)
-        self.header_fmt = self.workbook.add_format({
+        # Header Style (Grey) - Left aligned for Column A
+        self.header_fmt_left = self.workbook.add_format({
             'bold': True, 'text_wrap': True, 'valign': 'top',
-            'fg_color': '#D9D9D9', 'border': 1
+            'fg_color': '#D9D9D9', 'border': 1, 'align': 'left'
         })
-        # Section Divider Style (Blue)
-        self.section_fmt = self.workbook.add_format({
-            'bold': True, 'bg_color': '#BDD7EE', 'border': 1
+        # Header Style (Grey) - Center aligned for plan columns
+        self.header_fmt_center = self.workbook.add_format({
+            'bold': True, 'text_wrap': True, 'valign': 'top',
+            'fg_color': '#D9D9D9', 'border': 1, 'align': 'center'
         })
-        # Standard Cell Style
-        self.cell_fmt = self.workbook.add_format({
-            'text_wrap': True, 'valign': 'top', 'border': 1
+        # Section Divider Style (Dark Grey with White Font) - Left aligned
+        self.section_fmt_left = self.workbook.add_format({
+            'bold': True, 'bg_color': '#595959', 'font_color': '#FFFFFF',
+            'border': 1, 'align': 'left'
         })
-        # Currency Style ($)
-        self.currency_fmt = self.workbook.add_format({
+        # Section Divider Style (Dark Grey with White Font) - Center aligned
+        self.section_fmt_center = self.workbook.add_format({
+            'bold': True, 'bg_color': '#595959', 'font_color': '#FFFFFF',
+            'border': 1, 'align': 'center'
+        })
+        # Standard Cell Style - Left aligned
+        self.cell_fmt_left = self.workbook.add_format({
+            'text_wrap': True, 'valign': 'top', 'border': 1, 'align': 'left'
+        })
+        # Standard Cell Style - Center aligned
+        self.cell_fmt_center = self.workbook.add_format({
+            'text_wrap': True, 'valign': 'top', 'border': 1, 'align': 'center'
+        })
+        # Currency Style ($) - Left aligned
+        self.currency_fmt_left = self.workbook.add_format({
             'text_wrap': True, 'valign': 'top', 'border': 1,
-            'num_format': '$#,##0.00'
+            'num_format': '$#,##0.00', 'align': 'left'
         })
-        # Input Style (Yellow)
-        self.input_fmt = self.workbook.add_format({
+        # Currency Style ($) - Center aligned
+        self.currency_fmt_center = self.workbook.add_format({
             'text_wrap': True, 'valign': 'top', 'border': 1,
-            'bg_color': '#FFFFCC'
+            'num_format': '$#,##0.00', 'align': 'center'
         })
-        # Input Currency Style (Yellow + $)
-        self.input_currency_fmt = self.workbook.add_format({
+        # Percentage Style (%) - Left aligned
+        self.percent_fmt_left = self.workbook.add_format({
             'text_wrap': True, 'valign': 'top', 'border': 1,
-            'bg_color': '#FFFFCC', 'num_format': '$#,##0.00'
+            'num_format': '0.00%', 'align': 'left'
         })
-        # Percentage Style (%)
-        self.percent_fmt = self.workbook.add_format({
+        # Percentage Style (%) - Center aligned
+        self.percent_fmt_center = self.workbook.add_format({
             'text_wrap': True, 'valign': 'top', 'border': 1,
-            'num_format': '0.00%'  # Displays 0.15 as 15.00%
+            'num_format': '0.00%', 'align': 'center'
         })
         # Footer: Red bold disclaimer
         self.footer_red_fmt = self.workbook.add_format({
@@ -298,11 +326,11 @@ class ExcelReportGenerator:
             idx_map[row[0]] = r_idx + 2  # +1 for header row, +1 for 1-indexing
 
         # Write header row: "Plan Details" + merged plan name headers
-        worksheet.write(0, 0, 'Plan Details', self.header_fmt)
+        worksheet.write(0, 0, 'Plan Details', self.header_fmt_left)
         for i, plan_name in enumerate(plans):
             col_start = 1 + i * self.COLS_PER_PLAN
             col_end = col_start + self.COLS_PER_PLAN - 1
-            worksheet.merge_range(0, col_start, 0, col_end, plan_name, self.header_fmt)
+            worksheet.merge_range(0, col_start, 0, col_end, plan_name, self.header_fmt_center)
 
         # Write data rows
         for r_idx, row in enumerate(matrix_data):
@@ -312,24 +340,28 @@ class ExcelReportGenerator:
             is_section = all(x == '' for x in row[1:])
 
             # --- DETERMINE FORMAT ---
-            if is_section:
-                base_fmt = self.section_fmt
-            elif row_label in self.INPUT_ROWS:
-                if 'Difference' in row_label:
-                    base_fmt = self.input_currency_fmt
-                else:
-                    base_fmt = self.input_fmt
+            # Check if this row should have no special coloring
+            is_no_color = row_label in self.NO_COLOR_ROWS
+
+            if is_section and not is_no_color:
+                # Section headers get dark grey with white font
+                fmt_left = self.section_fmt_left
+                fmt_center = self.section_fmt_center
             elif row_label in self.PERCENT_ROWS:
-                base_fmt = self.percent_fmt
+                fmt_left = self.percent_fmt_left
+                fmt_center = self.percent_fmt_center
             elif row_label in self.CURRENCY_ROWS:
-                base_fmt = self.currency_fmt
+                fmt_left = self.currency_fmt_left
+                fmt_center = self.currency_fmt_center
             else:
-                base_fmt = self.cell_fmt
+                # Standard cell format (no special color)
+                fmt_left = self.cell_fmt_left
+                fmt_center = self.cell_fmt_center
 
-            # Write label column
-            worksheet.write(excel_row, 0, row_label, base_fmt)
+            # Write label column (left aligned)
+            worksheet.write(excel_row, 0, row_label, fmt_left)
 
-            # Write plan columns (each plan spans COLS_PER_PLAN columns, merged)
+            # Write plan columns (each plan spans COLS_PER_PLAN columns, merged, center aligned)
             for plan_i in range(num_plans):
                 col_start = 1 + plan_i * self.COLS_PER_PLAN
                 col_end = col_start + self.COLS_PER_PLAN - 1
@@ -356,8 +388,8 @@ class ExcelReportGenerator:
                             f"({col_letter}{r_ch}*{col_letter}{c_ch}) + "
                             f"({col_letter}{r_fam}*{col_letter}{c_fam})"
                         )
-                        worksheet.merge_range(excel_row, col_start, excel_row, col_end, '', base_fmt)
-                        worksheet.write_formula(excel_row, col_start, formula, base_fmt)
+                        worksheet.merge_range(excel_row, col_start, excel_row, col_end, '', self.currency_fmt_center)
+                        worksheet.write_formula(excel_row, col_start, formula, self.currency_fmt_center)
                         continue
                     except KeyError:
                         pass
@@ -368,17 +400,17 @@ class ExcelReportGenerator:
                         r_total = idx_map['Monthly Premium Total']
                         r_diff = idx_map['Monthly Premium Difference']
                         formula = f"=IFERROR(({col_letter}{r_total} - {col_letter}{r_diff}) / {col_letter}{r_diff}, 0)"
-                        worksheet.merge_range(excel_row, col_start, excel_row, col_end, '', base_fmt)
-                        worksheet.write_formula(excel_row, col_start, formula, base_fmt)
+                        worksheet.merge_range(excel_row, col_start, excel_row, col_end, '', self.percent_fmt_center)
+                        worksheet.write_formula(excel_row, col_start, formula, self.percent_fmt_center)
                         continue
                     except KeyError:
                         pass
 
                 # Section rows: merge across all plan columns
                 if is_section:
-                    worksheet.merge_range(excel_row, col_start, excel_row, col_end, '', base_fmt)
+                    worksheet.merge_range(excel_row, col_start, excel_row, col_end, '', fmt_center)
                 else:
-                    worksheet.merge_range(excel_row, col_start, excel_row, col_end, val, base_fmt)
+                    worksheet.merge_range(excel_row, col_start, excel_row, col_end, val, fmt_center)
 
         # --- FOOTER ROWS ---
         last_data_row = len(matrix_data)  # 0-indexed header + data rows

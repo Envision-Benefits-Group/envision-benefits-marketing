@@ -50,8 +50,8 @@ STRICT COMPLIANCE RULES:
 
         # 2) Reference the uploaded file in the model request
         resp = await client.responses.parse(
-            model="gpt-5-mini",
-                reasoning={"effort": "medium"},
+            model="gpt-5.2",
+                reasoning={"effort": "high"},
             instructions=system_rules,
             input=[
                 {
