@@ -79,6 +79,19 @@ class ExcelReportGenerator:
     # Rows that get Percent Format (%)
     PERCENT_ROWS = ['% Difference']
 
+    # Carrier Color Mapping (add new carriers here)
+    # Format: 'KEYWORD': {'bg_color': '#HEX', 'font_color': '#HEX'}
+    CARRIER_COLORS = {
+        'IHA': {'bg_color': '#FF0000', 'font_color': '#FFFFFF'},
+        'INDEPENDENT': {'bg_color': '#FF0000', 'font_color': '#FFFFFF'},
+        'HIGHMARK': {'bg_color': '#002060', 'font_color': '#FFFFFF'},
+        'UNIVERA': {'bg_color': '#92D050', 'font_color': '#000000'},
+        'EXCELLUS': {'bg_color': '#4472C4', 'font_color': '#FFFFFF'},
+    }
+
+    # Default header color if carrier not found
+    DEFAULT_HEADER_COLOR = {'bg_color': '#D9D9D9', 'font_color': '#000000'}
+
     def generate(self, df: pd.DataFrame) -> io.BytesIO:
         output = io.BytesIO()
         processed_df = self._preprocess_data(df)
@@ -294,18 +307,41 @@ class ExcelReportGenerator:
     # Number of Excel columns each plan spans
     COLS_PER_PLAN = 2
 
+    def _get_carrier_color(self, carrier_name: str) -> dict:
+        """Get color scheme for a carrier. Returns default if not found."""
+        carrier_upper = str(carrier_name).upper()
+        for keyword, colors in self.CARRIER_COLORS.items():
+            if keyword in carrier_upper:
+                return colors
+        return self.DEFAULT_HEADER_COLOR
+
+    def _create_carrier_header_format(self, carrier_name: str):
+        """Create a header format with carrier-specific colors."""
+        colors = self._get_carrier_color(carrier_name)
+        return self.workbook.add_format({
+            'bold': True,
+            'text_wrap': True,
+            'valign': 'top',
+            'fg_color': colors['bg_color'],
+            'font_color': colors['font_color'],
+            'border': 1,
+            'align': 'center'
+        })
+
     def _create_combined_healthyny_sheet(self, df):
         """Create a single HealthyNY tab combining all carriers."""
         subset = df[df['network_type'] == 'HealthyNY']
         if subset.empty:
             return
 
-        # Build plan headers with carrier name: "Carrier - Plan Name"
+        # Build plan headers and carrier list
         plan_headers = []
+        carriers = []
         for _, row in subset.iterrows():
             carrier = row['carrier']
             plan_name = row['plan_name']
             plan_headers.append(f"{carrier}\n{plan_name}")
+            carriers.append(carrier)
 
         matrix_data = []
 
@@ -323,13 +359,14 @@ class ExcelReportGenerator:
                 matrix_data.append(row_data)
 
         worksheet = self.workbook.add_worksheet('HealthyNY')
-        self._apply_sheet_formatting(worksheet, matrix_data, plan_headers)
+        self._apply_sheet_formatting(worksheet, matrix_data, plan_headers, carriers)
 
     def _create_sheet_for_network(self, df, carrier, network):
         subset = df[(df['carrier'] == carrier) & (df['network_type'] == network)]
         if subset.empty: return
 
         plans = subset['plan_name'].tolist()
+        carriers = [carrier] * len(plans)  # Same carrier for all plans in this sheet
         matrix_data = []
 
         # Build Matrix
@@ -346,11 +383,15 @@ class ExcelReportGenerator:
 
         sheet_name = f"{carrier[:15]} - {network}"[:30].replace("/", "")
         worksheet = self.workbook.add_worksheet(sheet_name)
-        self._apply_sheet_formatting(worksheet, matrix_data, plans)
+        self._apply_sheet_formatting(worksheet, matrix_data, plans, carriers)
 
-    def _apply_sheet_formatting(self, worksheet, matrix_data, plans):
+    def _apply_sheet_formatting(self, worksheet, matrix_data, plans, carriers=None):
         num_plans = len(plans)
         last_col = num_plans * self.COLS_PER_PLAN  # total plan columns
+
+        # Default carriers if not provided
+        if carriers is None:
+            carriers = [''] * num_plans
 
         worksheet.set_column(0, 0, 35)
         for i in range(num_plans):
@@ -363,12 +404,14 @@ class ExcelReportGenerator:
         for r_idx, row in enumerate(matrix_data):
             idx_map[row[0]] = r_idx + 2  # +1 for header row, +1 for 1-indexing
 
-        # Write header row: "Plan Details" + merged plan name headers
+        # Write header row: "Plan Details" + merged plan name headers with carrier colors
         worksheet.write(0, 0, 'Plan Details', self.header_fmt_left)
         for i, plan_name in enumerate(plans):
             col_start = 1 + i * self.COLS_PER_PLAN
             col_end = col_start + self.COLS_PER_PLAN - 1
-            worksheet.merge_range(0, col_start, 0, col_end, plan_name, self.header_fmt_center)
+            # Use carrier-specific header color
+            header_fmt = self._create_carrier_header_format(carriers[i])
+            worksheet.merge_range(0, col_start, 0, col_end, plan_name, header_fmt)
 
         # Write data rows
         for r_idx, row in enumerate(matrix_data):
