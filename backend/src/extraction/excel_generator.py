@@ -90,8 +90,15 @@ class ExcelReportGenerator:
             self.workbook = writer.book
             self._init_styles()
 
+            # Handle HealthyNY separately - consolidate all carriers into one tab
+            if 'HealthyNY' in network_types:
+                self._create_combined_healthyny_sheet(processed_df)
+
+            # Create per-carrier sheets for other network types
             for carrier in carriers:
                 for network in network_types:
+                    if network == 'HealthyNY':
+                        continue  # Already handled above
                     self._create_sheet_for_network(processed_df, carrier, network)
 
         output.seek(0)
@@ -286,6 +293,37 @@ class ExcelReportGenerator:
 
     # Number of Excel columns each plan spans
     COLS_PER_PLAN = 2
+
+    def _create_combined_healthyny_sheet(self, df):
+        """Create a single HealthyNY tab combining all carriers."""
+        subset = df[df['network_type'] == 'HealthyNY']
+        if subset.empty:
+            return
+
+        # Build plan headers with carrier name: "Carrier - Plan Name"
+        plan_headers = []
+        for _, row in subset.iterrows():
+            carrier = row['carrier']
+            plan_name = row['plan_name']
+            plan_headers.append(f"{carrier}\n{plan_name}")
+
+        matrix_data = []
+
+        # Build Matrix
+        for key, label in self.ROW_MAP.items():
+            if key.startswith('SECTION_'):
+                matrix_data.append([label] + [''] * len(subset))
+            else:
+                row_data = [label]
+                for i in range(len(subset)):
+                    val = subset.iloc[i].get(key, '')
+                    if pd.isna(val):
+                        val = ''
+                    row_data.append(val)
+                matrix_data.append(row_data)
+
+        worksheet = self.workbook.add_worksheet('HealthyNY')
+        self._apply_sheet_formatting(worksheet, matrix_data, plan_headers)
 
     def _create_sheet_for_network(self, df, carrier, network):
         subset = df[(df['carrier'] == carrier) & (df['network_type'] == network)]
