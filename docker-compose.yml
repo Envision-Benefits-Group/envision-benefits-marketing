@@ -35,7 +35,7 @@ services:
       start_period: 120s
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.backend.rule=Host(`api.envision-benefits.envisionhr360.com`)"
+      - "traefik.http.routers.backend.rule=Host(`api.envision-benefits.envisionsola.com`)"
       - "traefik.http.routers.backend.entrypoints=websecure"
       - "traefik.http.routers.backend.tls.certresolver=myresolver"
       - "traefik.http.services.backend.loadbalancer.server.port=8000"
@@ -140,7 +140,7 @@ services:
       start_period: 30s
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.frontend.rule=Host(`envision-benefits.envisionhr360.com`)"
+      - "traefik.http.routers.frontend.rule=Host(`envision-benefits.envisionsola.com`)"
       - "traefik.http.routers.frontend.entrypoints=websecure"
       - "traefik.http.routers.frontend.tls.certresolver=myresolver"
       - "traefik.http.services.frontend.loadbalancer.server.port=3000"
