@@ -44,6 +44,8 @@ services:
     volumes:
       - ./backend/data:/app/data  # Mounted volume for data
       - ./backend/logs:/app/logs  # Mounted volume for logs
+    ports:
+      - "8000:8000"
     networks:
       - traefik_network
     restart: always
@@ -144,6 +146,8 @@ services:
       - "traefik.http.services.frontend.loadbalancer.server.port=3000"
       # Autoheal
       - "autoheal=true"
+    ports:
+      - "3000:3000"
     networks:
       - traefik_network
     restart: always
