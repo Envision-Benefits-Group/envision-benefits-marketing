@@ -1,5 +1,6 @@
 import pandas as pd
 import io
+from difflib import SequenceMatcher
 from xlsxwriter.utility import xl_col_to_name
 
 
@@ -224,9 +225,23 @@ class ExcelReportGenerator:
         carrier = str(row.get("carrier", "")).upper()
         plan = str(row.get("plan_name", "")).upper()
 
-        # Healthy NY — check first as it can appear across carriers
-        if any(k in plan for k in ("HEALTHY NY", "HNY")) or "HEALTHY NY" in carrier:
-            return "HealthyNY"
+        # Healthy NY — fuzzy match against known variations
+        hny_refs = ["HEALTHY NY", "HEALTHY NEW YORK", "HNY", "HEALTHYNY"]
+        combined = f"{carrier} {plan}"
+        for ref in hny_refs:
+            if ref in combined:
+                return "HealthyNY"
+        # Fuzzy: check if any word sequence in plan name is close to "healthy new york"
+        for ref in ["HEALTHY NEW YORK", "HEALTHY NY"]:
+            if SequenceMatcher(None, ref, plan).ratio() >= 0.6:
+                return "HealthyNY"
+            # Also check substrings of the plan name
+            words = plan.split()
+            for i in range(len(words)):
+                for j in range(i + 2, min(i + 5, len(words) + 1)):
+                    chunk = " ".join(words[i:j])
+                    if SequenceMatcher(None, ref, chunk).ratio() >= 0.7:
+                        return "HealthyNY"
 
         # Univera
         if "UNIVERA" in carrier:

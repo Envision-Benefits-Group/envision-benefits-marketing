@@ -1,16 +1,15 @@
 import os
-import asyncio
-import pandas as pd
-from datetime import datetime
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Security, status
+from fastapi import APIRouter, UploadFile, File, HTTPException, Security, status, Depends
 from fastapi.security import APIKeyHeader
-from fastapi.responses import StreamingResponse
-from typing import Annotated, Optional, List
-from .service import extract_from_pdf, process_excel_report
+from typing import Annotated, List
+from sqlalchemy.ext.asyncio import AsyncSession
+from .service import extract_from_pdf, upload_pdf, detect_quarters
+from .schemas import InsurancePlan
+from src.database import get_db
+from src.plans.repository import save_plans
 
 router = APIRouter()
 
-VALID_QUARTERS = {"Q1", "Q2", "Q3", "Q4"}
 API_KEY_NAME = "x-api-key"
 api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
 
@@ -23,57 +22,22 @@ async def get_api_key(api_key_header: str = Security(api_key_header)):
         detail="Could not validate credentials",
     )
 
-@router.post("/process-pdf")
-async def process_pdf(
-        file: Annotated[UploadFile, File(description="Upload the Insurance PDF")],
+
+@router.post("/ingest")
+async def ingest_pdfs(
+        files: Annotated[List[UploadFile], File(description="Upload Insurance PDFs to ingest")],
         api_key: str = Security(get_api_key),
-        quarter: Annotated[Optional[str], Form(description="Target Quarter (e.g., Q1, Q2, Q3, Q4)")] = None
-):
-    if file.content_type != "application/pdf":
-        raise HTTPException(status_code=400, detail="Invalid file type. Please upload a PDF.")
-
-    if quarter:
-        quarter = quarter.strip().upper()
-        if quarter not in VALID_QUARTERS:
-            raise HTTPException(status_code=400, detail=f"Invalid quarter '{quarter}'. Must be one of: Q1, Q2, Q3, Q4")
-    else:
-        quarter = f"Q{(datetime.now().month - 1) // 3 + 1}"
-    content = await file.read()
-
-    # 1. AI Extraction
-    try:
-        df = await extract_from_pdf(content, quarter)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-    if df.empty:
-        raise HTTPException(status_code=400, detail="No plans extracted.")
-
-    # 2. Excel Generation (Using the class via service)
-    excel_file = process_excel_report(df)
-
-    carrier = "-".join(df['carrier'].unique()).replace(" ", "_")
-    filename = f"Insurance-{carrier}-{quarter}.xlsx"
-    return StreamingResponse(
-        excel_file,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f"attachment; filename={filename}"}
-    )
-
-
-@router.post("/process-pdfs")
-async def process_pdfs(
-        files: Annotated[List[UploadFile], File(description="Upload multiple Insurance PDFs")],
-        api_key: str = Security(get_api_key),
-        quarter: Annotated[Optional[str], Form(description="Target Quarter (e.g., Q1, Q2, Q3, Q4)")] = None
+        db: AsyncSession = Depends(get_db),
 ):
     """
-    Process multiple PDF files in parallel and return a single combined Excel report.
+    Ingest one or more insurance PDFs. For each file:
+    1. Upload PDF to OpenAI (once)
+    2. Detect which quarters are present (lightweight call)
+    3. Extract plans quarter-by-quarter, saving each to DB before the next
     """
     if not files:
         raise HTTPException(status_code=400, detail="No files provided.")
 
-    # Validate all files are PDFs
     for file in files:
         if file.content_type != "application/pdf":
             raise HTTPException(
@@ -81,49 +45,74 @@ async def process_pdfs(
                 detail=f"Invalid file type for '{file.filename}'. All files must be PDFs."
             )
 
-    # Validate/auto-detect quarter
-    if quarter:
-        quarter = quarter.strip().upper()
-        if quarter not in VALID_QUARTERS:
-            raise HTTPException(status_code=400, detail=f"Invalid quarter '{quarter}'. Must be one of: Q1, Q2, Q3, Q4")
-    else:
-        quarter = f"Q{(datetime.now().month - 1) // 3 + 1}"
+    results_per_file = []
 
-    # Read all file contents
-    file_contents = []
     for file in files:
         content = await file.read()
-        file_contents.append((file.filename, content))
+        filename = file.filename
+        file_result = {
+            "file": filename,
+            "quarters": {},
+            "total_plans": 0,
+            "inserted": 0,
+            "updated_exact": 0,
+            "updated_fuzzy": 0,
+        }
 
-    # Process all PDFs in parallel
-    async def extract_single(filename: str, content: bytes) -> pd.DataFrame:
+        # 1. Upload PDF once
         try:
-            return await extract_from_pdf(content, quarter)
+            file_id = await upload_pdf(content)
         except Exception as e:
-            print(f"Error extracting from {filename}: {str(e)}")
-            return pd.DataFrame()
+            file_result["status"] = "error"
+            file_result["detail"] = f"Upload failed: {str(e)}"
+            results_per_file.append(file_result)
+            continue
 
-    extraction_tasks = [
-        extract_single(filename, content)
-        for filename, content in file_contents
-    ]
+        # 2. Detect which quarters exist in this file
+        try:
+            detected = await detect_quarters(file_id)
+            file_result["detected_quarters"] = detected
+        except Exception as e:
+            file_result["status"] = "error"
+            file_result["detail"] = f"Quarter detection failed: {str(e)}"
+            results_per_file.append(file_result)
+            continue
 
-    results = await asyncio.gather(*extraction_tasks)
+        # 3. Extract plans for each detected quarter sequentially
+        for quarter in detected:
+            try:
+                plan_dicts = await extract_from_pdf(file_id, quarter)
 
-    # Combine all DataFrames
-    combined_df = pd.concat([df for df in results if not df.empty], ignore_index=True)
+                if not plan_dicts:
+                    file_result["quarters"][quarter] = {"status": "no_plans_found", "plans": 0}
+                    continue
 
-    if combined_df.empty:
-        raise HTTPException(status_code=400, detail="No plans extracted from any of the uploaded files.")
+                plan_objects = [InsurancePlan(**p) for p in plan_dicts]
+                summary = await save_plans(db, plan_objects)
 
-    # Generate single Excel report
-    excel_file = process_excel_report(combined_df)
+                file_result["quarters"][quarter] = {
+                    "status": "success",
+                    "plans": len(plan_objects),
+                    **summary,
+                }
+                file_result["total_plans"] += len(plan_objects)
+                file_result["inserted"] += summary["inserted"]
+                file_result["updated_exact"] += summary["updated_exact"]
+                file_result["updated_fuzzy"] += summary["updated_fuzzy"]
 
-    carriers = "-".join(combined_df['carrier'].unique()).replace(" ", "_")
-    filename = f"Insurance-{carriers}-{quarter}.xlsx"
+            except Exception as e:
+                await db.rollback()
+                file_result["quarters"][quarter] = {
+                    "status": "error",
+                    "detail": str(e),
+                }
 
-    return StreamingResponse(
-        excel_file,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f"attachment; filename={filename}"}
-    )
+        file_result["status"] = "success" if file_result["total_plans"] > 0 else "no_plans_found"
+        results_per_file.append(file_result)
+
+    total_plans = sum(r.get("total_plans", 0) for r in results_per_file)
+    return {
+        "total_files": len(files),
+        "total_plans_ingested": total_plans,
+        "files": results_per_file,
+    }

@@ -58,6 +58,7 @@ if __name__ == "__main__":
             "bind": "0.0.0.0:8000",
             "workers": 3,  # Consider making this configurable via env var
             "worker_class": "uvicorn.workers.UvicornWorker",
+            "timeout": 300,  # 5 min — AI extraction can take a while
             "proxy_protocol": True,
             "forwarded_allow_ips": "*",
             # Log to both file and stdout
