@@ -80,18 +80,51 @@ class ExcelReportGenerator:
     # Rows that get Percent Format (%)
     PERCENT_ROWS = ['% Difference']
 
-    # Carrier Color Mapping (add new carriers here)
+    # Color Mapping — matched by keyword in carrier/plan name (add new entries here)
     # Format: 'KEYWORD': {'bg_color': '#HEX', 'font_color': '#HEX'}
     CARRIER_COLORS = {
+        # Medical — Carriers
         'IHA': {'bg_color': '#FF0000', 'font_color': '#FFFFFF'},
         'INDEPENDENT': {'bg_color': '#FF0000', 'font_color': '#FFFFFF'},
-        'HIGHMARK': {'bg_color': '#002060', 'font_color': '#FFFFFF'},
-        'UNIVERA': {'bg_color': '#92D050', 'font_color': '#000000'},
+        'HIGHMARK': {'bg_color': '#008DD1', 'font_color': '#FFFFFF'},
+        'UNIVERA': {'bg_color': '#82BB00', 'font_color': '#000000'},
         'EXCELLUS': {'bg_color': '#4472C4', 'font_color': '#FFFFFF'},
+        # Disability — STD
+        'SHORT-TERM DISABILITY': {'bg_color': '#B39DDB', 'font_color': '#000000'},
+        'STD': {'bg_color': '#B39DDB', 'font_color': '#000000'},
+        # Disability — STD Current/Renewal
+        'STD CURRENT': {'bg_color': '#D1C4E9', 'font_color': '#000000'},
+        'STD RENEWAL': {'bg_color': '#D1C4E9', 'font_color': '#000000'},
+        # Disability — LTD
+        'LONG-TERM DISABILITY': {'bg_color': '#4DB6AC', 'font_color': '#000000'},
+        'LTD': {'bg_color': '#4DB6AC', 'font_color': '#000000'},
+        # Disability — LTD Current/Renewal
+        'LTD CURRENT': {'bg_color': '#A8DADC', 'font_color': '#000000'},
+        'LTD RENEWAL': {'bg_color': '#A8DADC', 'font_color': '#000000'},
+        # Dental
+        'DENTAL': {'bg_color': '#FF8624', 'font_color': '#000000'},
+        'DENTAL CURRENT': {'bg_color': '#FFA862', 'font_color': '#000000'},
+        'DENTAL RENEWAL': {'bg_color': '#FFA862', 'font_color': '#000000'},
+        # Vision
+        'VISION CURRENT': {'bg_color': '#FFC5D3', 'font_color': '#000000'},
+        'VISION RENEWAL': {'bg_color': '#FFC5D3', 'font_color': '#000000'},
+        'VISION': {'bg_color': '#E75480', 'font_color': '#FFFFFF'},
+        # Legal
+        'LEGAL': {'bg_color': '#6E238E', 'font_color': '#FFFFFF'},
+        # Life — Basic Life & AD&D
+        'BASIC LIFE': {'bg_color': '#06402B', 'font_color': '#FFFFFF'},
+        'AD&D': {'bg_color': '#06402B', 'font_color': '#FFFFFF'},
+        'LIFE CURRENT': {'bg_color': '#80EF80', 'font_color': '#000000'},
+        'LIFE RENEWAL': {'bg_color': '#80EF80', 'font_color': '#000000'},
+        # Voluntary Life & AD&D
+        'VOLUNTARY LIFE': {'bg_color': '#9CAF88', 'font_color': '#000000'},
+        'VOL LIFE': {'bg_color': '#9CAF88', 'font_color': '#000000'},
+        'VOL CURRENT': {'bg_color': '#737D5C', 'font_color': '#FFFFFF'},
+        'VOL RENEWAL': {'bg_color': '#737D5C', 'font_color': '#FFFFFF'},
     }
 
-    # Default header color if carrier not found
-    DEFAULT_HEADER_COLOR = {'bg_color': '#D9D9D9', 'font_color': '#000000'}
+    # Default header color if carrier/category not matched
+    DEFAULT_HEADER_COLOR = {'bg_color': '#708090', 'font_color': '#FFFFFF'}
 
     def generate(self, df: pd.DataFrame) -> io.BytesIO:
         output = io.BytesIO()
@@ -185,8 +218,19 @@ class ExcelReportGenerator:
             return f"{ee} / {fam} ({oop_type})"
 
         df['oop_oon_display'] = df.apply(fmt_oop_oon, axis=1)
-        df['rx_display'] = df['rx_generic'].astype(str) + " / " + df['rx_preferred_brand'].astype(str) + " / " + df[
-            'rx_non_preferred_brand'].astype(str)
+        def fmt_rx(row):
+            parts = [
+                str(row.get('rx_generic', '')),
+                str(row.get('rx_preferred_brand', '')),
+                str(row.get('rx_non_preferred_brand', '')),
+            ]
+            prefix = "Deductible then "
+            has_deductible = any(p.startswith(prefix) for p in parts)
+            cleaned = [p[len(prefix):].strip() if p.startswith(prefix) else p.strip() for p in parts]
+            combined = " / ".join(cleaned)
+            return f"Deductible then {combined}" if has_deductible else combined
+
+        df['rx_display'] = df.apply(fmt_rx, axis=1)
 
         return df
 
@@ -263,12 +307,12 @@ class ExcelReportGenerator:
     def _init_styles(self):
         # Header Style (Grey) - Left aligned for Column A
         self.header_fmt_left = self.workbook.add_format({
-            'bold': True, 'text_wrap': True, 'valign': 'top',
+            'bold': True, 'text_wrap': True, 'valign': 'vcenter',
             'fg_color': '#D9D9D9', 'border': 1, 'align': 'left'
         })
         # Header Style (Grey) - Center aligned for plan columns
         self.header_fmt_center = self.workbook.add_format({
-            'bold': True, 'text_wrap': True, 'valign': 'top',
+            'bold': True, 'text_wrap': True, 'valign': 'vcenter',
             'fg_color': '#D9D9D9', 'border': 1, 'align': 'center'
         })
         # Section Divider Style (Dark Grey with White Font) - Left aligned
@@ -336,7 +380,7 @@ class ExcelReportGenerator:
         return self.workbook.add_format({
             'bold': True,
             'text_wrap': True,
-            'valign': 'top',
+            'valign': 'vcenter',
             'fg_color': colors['bg_color'],
             'font_color': colors['font_color'],
             'border': 1,
@@ -465,37 +509,39 @@ class ExcelReportGenerator:
                 col_letter = xl_col_to_name(col_start)
                 val = row[plan_i + 1] if plan_i + 1 < len(row) else ''
 
-                # Formula: Monthly Premium Total
+                # Formula: Monthly Premium Total (SUMPRODUCT of rates * counts)
                 if row_label == 'Monthly Premium Total':
                     try:
                         r_ee = idx_map['Employee Only']
-                        r_sp = idx_map['Employee + Spouse']
-                        r_ch = idx_map['Employee + Child(ren)']
                         r_fam = idx_map['Family']
-
                         c_ee = idx_map['Count: Employee Only']
-                        c_sp = idx_map['Count: Employee + Spouse']
-                        c_ch = idx_map['Count: Employee + Child(ren)']
                         c_fam = idx_map['Count: Family']
 
-                        formula = (
-                            f"=({col_letter}{r_ee}*{col_letter}{c_ee}) + "
-                            f"({col_letter}{r_sp}*{col_letter}{c_sp}) + "
-                            f"({col_letter}{r_ch}*{col_letter}{c_ch}) + "
-                            f"({col_letter}{r_fam}*{col_letter}{c_fam})"
-                        )
+                        formula = f"=SUMPRODUCT({col_letter}{r_ee}:{col_letter}{r_fam},{col_letter}{c_ee}:{col_letter}{c_fam})"
                         worksheet.merge_range(excel_row, col_start, excel_row, col_end, '', self.currency_fmt_center)
                         worksheet.write_formula(excel_row, col_start, formula, self.currency_fmt_center)
                         continue
                     except KeyError:
                         pass
 
-                # Formula: % Difference
+                # Formula: Monthly Premium Difference (=C7-B7 pattern)
+                elif row_label == 'Monthly Premium Difference':
+                    try:
+                        r_total = idx_map['Monthly Premium Total']
+                        next_col_letter = xl_col_to_name(col_start + 1)
+                        formula = f"={next_col_letter}{r_total}-{col_letter}{r_total}"
+                        worksheet.merge_range(excel_row, col_start, excel_row, col_end, '', self.currency_fmt_center)
+                        worksheet.write_formula(excel_row, col_start, formula, self.currency_fmt_center)
+                        continue
+                    except KeyError:
+                        pass
+
+                # Formula: % Difference (=(C7-B7)/B7 pattern)
                 elif row_label == '% Difference':
                     try:
                         r_total = idx_map['Monthly Premium Total']
-                        r_diff = idx_map['Monthly Premium Difference']
-                        formula = f"=IFERROR(({col_letter}{r_total} - {col_letter}{r_diff}) / {col_letter}{r_diff}, 0)"
+                        next_col_letter = xl_col_to_name(col_start + 1)
+                        formula = f"=({next_col_letter}{r_total}-{col_letter}{r_total})/{col_letter}{r_total}"
                         worksheet.merge_range(excel_row, col_start, excel_row, col_end, '', self.percent_fmt_center)
                         worksheet.write_formula(excel_row, col_start, formula, self.percent_fmt_center)
                         continue
@@ -507,6 +553,19 @@ class ExcelReportGenerator:
                     worksheet.merge_range(excel_row, col_start, excel_row, col_end, '', fmt_center)
                 else:
                     worksheet.merge_range(excel_row, col_start, excel_row, col_end, val, fmt_center)
+
+        # --- AUTO-FIT ROW HEIGHTS (xlsxwriter doesn't auto-size merged cells) ---
+        merged_char_width = 18 * self.COLS_PER_PLAN  # characters that fit in a merged cell
+        for r_idx, row in enumerate(matrix_data):
+            excel_row = r_idx + 1
+            max_lines = 1
+            for val in row:
+                text = str(val) if val else ''
+                if text:
+                    lines = max(1, -(-len(text) // merged_char_width))  # ceiling division
+                    max_lines = max(max_lines, lines)
+            if max_lines > 1:
+                worksheet.set_row(excel_row, max_lines * 15)
 
         # --- FOOTER ROWS ---
         last_data_row = len(matrix_data)  # 0-indexed header + data rows
