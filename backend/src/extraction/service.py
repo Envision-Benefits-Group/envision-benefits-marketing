@@ -7,11 +7,16 @@ from .schemas import PlanList, DetectedQuarters
 
 API_KEY = os.getenv("OPENAI_API_KEY")
 
+_client: AsyncOpenAI | None = None
+
 
 def get_client() -> AsyncOpenAI:
+    global _client
     if not API_KEY:
-        raise HTTPException(status_code=500, detail="OPENAI_API_KEY_V2 is not set.")
-    return AsyncOpenAI(api_key=API_KEY)
+        raise HTTPException(status_code=500, detail="OPENAI_API_KEY is not set.")
+    if _client is None:
+        _client = AsyncOpenAI(api_key=API_KEY)
+    return _client
 
 
 async def upload_pdf(file_content: bytes) -> str:
@@ -37,8 +42,8 @@ async def detect_quarters(file_id: str) -> list[str]:
 
     try:
         resp = await client.responses.parse(
-            model="gpt-5.2",
-            reasoning={"effort": "low"},
+            model="gpt-5-mini",
+            reasoning = {"effort": "low"},
             instructions=(
                 "You are analyzing an insurance document. "
                 "Identify which quarters (Q1, Q2, Q3, Q4) have rate data in this document. "
