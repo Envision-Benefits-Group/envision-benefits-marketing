@@ -22,12 +22,13 @@ import {
 } from "@/components/ui/table";
 import { SelectedPlansPanel } from "@/components/plans/selected-plans-panel";
 import { plansApi } from "@/lib/api";
-import { GripVertical, LayoutGrid, List, Plus, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, GripVertical, LayoutGrid, List, Plus, X } from "lucide-react";
 import type { Plan } from "@/types/plans";
 
 const CARRIERS = ["IHA", "Highmark", "Univera", "Excellus"];
 const YEARS = [2024, 2025, 2026, 2027];
 const QUARTERS = ["Q1", "Q2", "Q3", "Q4"];
+const PAGE_SIZE = 20;
 
 const CARRIER_COLORS: Record<string, string> = {
   IHA: "bg-red-600 text-white",
@@ -61,8 +62,11 @@ export function ComparisonTab() {
   const [renewalQuarter, setRenewalQuarter] = useState<string | undefined>();
 
   // ── Browse filter (carrier only — period is handled by selectors) ─
-  const [carrierFilter, setCarrierFilter] = useState<string | undefined>();
+  const [carrierFilters, setCarrierFilters] = useState<Set<string>>(new Set());
   const [viewMode, setViewMode] = useState<"list" | "grid">("list");
+
+  // ── Pagination ────────────────────────────────────────────────────
+  const [page, setPage] = useState(1);
 
   // ── Selections ────────────────────────────────────────────────────
   const [selectedCurrentIds, setSelectedCurrentIds] = useState<Set<string>>(new Set());
@@ -96,15 +100,26 @@ export function ComparisonTab() {
 
   useEffect(() => { fetchPlans(); }, [fetchPlans]);
 
-  // ── Plans visible in the table (current period + optional carrier) ─
+  // ── Plans visible in the table (current period + optional carriers) ─
   const tablePlans = useMemo(() => {
     return allPlans.filter((p) => {
       if (currentYear    && p.year    !== currentYear)    return false;
       if (currentQuarter && p.quarter !== currentQuarter) return false;
-      if (carrierFilter  && !p.carrier.toUpperCase().includes(carrierFilter.toUpperCase())) return false;
+      if (carrierFilters.size > 0 && !Array.from(carrierFilters).some((cf) =>
+        p.carrier.toUpperCase().includes(cf.toUpperCase())
+      )) return false;
       return true;
     });
-  }, [allPlans, currentYear, currentQuarter, carrierFilter]);
+  }, [allPlans, currentYear, currentQuarter, carrierFilters]);
+
+  // Reset page when filters change
+  useEffect(() => { setPage(1); }, [currentYear, currentQuarter, carrierFilters]);
+
+  const totalPages = Math.max(1, Math.ceil(tablePlans.length / PAGE_SIZE));
+  const paginatedPlans = useMemo(
+    () => tablePlans.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
+    [tablePlans, page]
+  );
 
   // ── Auto-find the renewal counterpart for a given plan ────────────
   const findRenewal = useCallback(
@@ -435,25 +450,40 @@ export function ComparisonTab() {
 
       {/* ── Browse filters ─────────────────────────────────────────── */}
       <div className="flex flex-wrap items-center gap-3">
-        <Select
-          value={carrierFilter ?? ""}
-          onValueChange={(v) => setCarrierFilter(v || undefined)}
-        >
-          <SelectTrigger className="w-[150px]">
-            <SelectValue placeholder="All Carriers" />
-          </SelectTrigger>
-          <SelectContent>
-            {CARRIERS.map((c) => (
-              <SelectItem key={c} value={c}>{c}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-
-        {carrierFilter && (
-          <Button variant="ghost" size="sm" onClick={() => setCarrierFilter(undefined)}>
-            <X className="h-4 w-4 mr-1" /> Clear carrier
-          </Button>
-        )}
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-xs text-muted-foreground font-medium">Carriers:</span>
+          {CARRIERS.map((c) => {
+            const active = carrierFilters.has(c);
+            return (
+              <button
+                key={c}
+                onClick={() => {
+                  setCarrierFilters((prev) => {
+                    const next = new Set(prev);
+                    if (next.has(c)) next.delete(c);
+                    else next.add(c);
+                    return next;
+                  });
+                }}
+                className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+                  active
+                    ? "bg-primary text-primary-foreground border-primary"
+                    : "bg-white text-gray-600 border-gray-300 hover:border-gray-500"
+                }`}
+              >
+                {c}
+              </button>
+            );
+          })}
+          {carrierFilters.size > 0 && (
+            <button
+              onClick={() => setCarrierFilters(new Set())}
+              className="text-xs text-muted-foreground underline hover:text-gray-900"
+            >
+              Clear
+            </button>
+          )}
+        </div>
 
         <div className="ml-auto flex border rounded-md">
           <Button
@@ -474,7 +504,7 @@ export function ComparisonTab() {
       </div>
 
       <p className="text-xs text-muted-foreground">
-        Showing plans for <strong>{periodLabel}</strong>. Click <strong>Select</strong> to add a plan as Current and auto-pair its Renewal. Click <strong>Option</strong> for alternative plans (change carrier to browse other carriers).
+        Showing plans for <strong>{periodLabel}</strong>. Click <strong>Select</strong> to add a plan as Current and auto-pair its Renewal. Click <strong>Option</strong> for alternative plans (toggle carriers above to browse).
       </p>
 
       <div className="flex gap-6">
@@ -501,7 +531,7 @@ export function ComparisonTab() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {tablePlans.map((plan) => {
+                  {paginatedPlans.map((plan) => {
                     const state = getState(plan.plan_id);
                     return (
                       <TableRow
@@ -562,7 +592,7 @@ export function ComparisonTab() {
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {tablePlans.map((plan) => {
+              {paginatedPlans.map((plan) => {
                 const state = getState(plan.plan_id);
                 return (
                   <Card
@@ -636,9 +666,36 @@ export function ComparisonTab() {
           )}
 
           {tablePlans.length > 0 && (
-            <p className="text-xs text-muted-foreground mt-3">
-              {tablePlans.length} plan{tablePlans.length !== 1 ? "s" : ""}
-            </p>
+            <div className="flex items-center justify-between mt-3">
+              <p className="text-xs text-muted-foreground">
+                Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, tablePlans.length)} of {tablePlans.length} plan{tablePlans.length !== 1 ? "s" : ""}
+              </p>
+              {totalPages > 1 && (
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 px-2"
+                    onClick={() => setPage((p) => p - 1)}
+                    disabled={page === 1}
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </Button>
+                  <span className="text-xs text-muted-foreground">
+                    Page {page} of {totalPages}
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 px-2"
+                    onClick={() => setPage((p) => p + 1)}
+                    disabled={page === totalPages}
+                  >
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                </div>
+              )}
+            </div>
           )}
         </div>
 

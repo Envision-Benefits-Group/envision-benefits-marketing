@@ -183,8 +183,8 @@ export function PlanEditDialog({
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit(onSubmit)}>
-          <ScrollArea className="h-[60vh] pr-4">
-            <div className="space-y-6">
+          <ScrollArea className="h-[60vh]">
+            <div className="space-y-6 pr-5">
               {/* Basic Info */}
               <section>
                 <h4 className="text-sm font-semibold mb-3">Basic Info</h4>

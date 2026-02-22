@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useMemo } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -19,9 +19,10 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Download, Pencil, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Download, Pencil, X } from "lucide-react";
 import type { BrowseFilters, Plan } from "@/types/plans";
 
+const PAGE_SIZE = 20;
 const CARRIERS = ["IHA", "Highmark", "Univera", "Excellus"];
 const YEARS = [2024, 2025, 2026, 2027];
 const QUARTERS = ["Q1", "Q2", "Q3", "Q4"];
@@ -58,16 +59,23 @@ export function PlansTableTab({
   onDownloadMasterTemplate,
   isDownloading,
 }: PlansTableTabProps) {
+  const [page, setPage] = useState(1);
+
+  // Reset to page 1 whenever the plan list changes (filter applied)
+  useEffect(() => { setPage(1); }, [plans]);
+
+  const totalPages = Math.max(1, Math.ceil(plans.length / PAGE_SIZE));
+  const paginated = plans.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
   const grouped = useMemo(() => {
     const map = new Map<string, Plan[]>();
-    for (const plan of plans) {
+    for (const plan of paginated) {
       const existing = map.get(plan.carrier) || [];
       existing.push(plan);
       map.set(plan.carrier, existing);
     }
-    // Sort carriers alphabetically
     return Array.from(map.entries()).sort(([a], [b]) => a.localeCompare(b));
-  }, [plans]);
+  }, [paginated]);
 
   const hasFilters =
     filters.carrier || filters.year || filters.quarter || filters.network_type;
@@ -274,9 +282,36 @@ export function PlansTableTab({
       )}
 
       {!loading && plans.length > 0 && (
-        <p className="text-xs text-muted-foreground">
-          {plans.length} plan{plans.length !== 1 ? "s" : ""} found
-        </p>
+        <div className="flex items-center justify-between pt-1">
+          <p className="text-xs text-muted-foreground">
+            Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, plans.length)} of {plans.length} plan{plans.length !== 1 ? "s" : ""}
+          </p>
+          {totalPages > 1 && (
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 px-2"
+                onClick={() => setPage((p) => p - 1)}
+                disabled={page === 1}
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <span className="text-xs text-muted-foreground">
+                Page {page} of {totalPages}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 px-2"
+                onClick={() => setPage((p) => p + 1)}
+                disabled={page === totalPages}
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
+          )}
+        </div>
       )}
     </div>
   );
