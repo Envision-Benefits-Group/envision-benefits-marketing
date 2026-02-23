@@ -19,7 +19,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { ChevronLeft, ChevronRight, Download, Pencil, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Download, Pencil, Search, X } from "lucide-react";
+import { Input } from "@/components/ui/input";
 import type { BrowseFilters, Plan } from "@/types/plans";
 
 const PAGE_SIZE = 20;
@@ -60,12 +61,19 @@ export function PlansTableTab({
   isDownloading,
 }: PlansTableTabProps) {
   const [page, setPage] = useState(1);
+  const [search, setSearch] = useState("");
 
-  // Reset to page 1 whenever the plan list changes (filter applied)
-  useEffect(() => { setPage(1); }, [plans]);
+  // Reset to page 1 whenever the plan list or search changes
+  useEffect(() => { setPage(1); }, [plans, search]);
 
-  const totalPages = Math.max(1, Math.ceil(plans.length / PAGE_SIZE));
-  const paginated = plans.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const filtered = useMemo(() => {
+    if (!search.trim()) return plans;
+    const q = search.toLowerCase();
+    return plans.filter((p) => p.plan_name.toLowerCase().includes(q));
+  }, [plans, search]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   const grouped = useMemo(() => {
     const map = new Map<string, Plan[]>();
@@ -78,7 +86,7 @@ export function PlansTableTab({
   }, [paginated]);
 
   const hasFilters =
-    filters.carrier || filters.year || filters.quarter || filters.network_type;
+    filters.carrier || filters.year || filters.quarter || filters.network_type || search;
 
   const columnCount = 11; // Plan Name + 4 rates + PCP + Deductible + OOP Max + Quarter + Year + Actions
 
@@ -86,6 +94,16 @@ export function PlansTableTab({
     <div className="space-y-4">
       {/* Inline filter bar */}
       <div className="flex flex-wrap items-center gap-3">
+        <div className="relative">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search plans..."
+            className="pl-8 w-[200px] h-9"
+          />
+        </div>
+
         <Select
           value={filters.carrier || ""}
           onValueChange={(v) =>
@@ -162,7 +180,7 @@ export function PlansTableTab({
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => onFiltersChange({})}
+            onClick={() => { onFiltersChange({}); setSearch(""); }}
           >
             <X className="h-4 w-4 mr-1" />
             Clear
@@ -194,9 +212,11 @@ export function PlansTableTab({
             <Skeleton key={i} className="h-10 w-full rounded" />
           ))}
         </div>
-      ) : plans.length === 0 ? (
+      ) : filtered.length === 0 ? (
         <div className="text-center py-12 text-muted-foreground">
-          No plans found. Try adjusting your filters or upload some PDFs.
+          {plans.length === 0
+            ? "No plans found. Try adjusting your filters or upload some PDFs."
+            : `No plans match "${search}".`}
         </div>
       ) : (
         <div className="border rounded-lg overflow-auto">
@@ -281,10 +301,10 @@ export function PlansTableTab({
         </div>
       )}
 
-      {!loading && plans.length > 0 && (
+      {!loading && filtered.length > 0 && (
         <div className="flex items-center justify-between pt-1">
           <p className="text-xs text-muted-foreground">
-            Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, plans.length)} of {plans.length} plan{plans.length !== 1 ? "s" : ""}
+            Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filtered.length)} of {filtered.length} plan{filtered.length !== 1 ? "s" : ""}
           </p>
           {totalPages > 1 && (
             <div className="flex items-center gap-2">

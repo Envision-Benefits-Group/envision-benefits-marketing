@@ -22,7 +22,8 @@ import {
 } from "@/components/ui/table";
 import { SelectedPlansPanel } from "@/components/plans/selected-plans-panel";
 import { plansApi } from "@/lib/api";
-import { ChevronLeft, ChevronRight, GripVertical, LayoutGrid, List, Plus, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, GripVertical, LayoutGrid, List, Plus, Search, X } from "lucide-react";
+import { Input } from "@/components/ui/input";
 import type { Plan } from "@/types/plans";
 
 const CARRIERS = ["IHA", "Highmark", "Univera", "Excellus"];
@@ -63,6 +64,7 @@ export function ComparisonTab() {
 
   // ── Browse filter (carrier only — period is handled by selectors) ─
   const [carrierFilters, setCarrierFilters] = useState<Set<string>>(new Set());
+  const [search, setSearch] = useState("");
   const [viewMode, setViewMode] = useState<"list" | "grid">("list");
 
   // ── Pagination ────────────────────────────────────────────────────
@@ -112,13 +114,19 @@ export function ComparisonTab() {
     });
   }, [allPlans, currentYear, currentQuarter, carrierFilters]);
 
-  // Reset page when filters change
-  useEffect(() => { setPage(1); }, [currentYear, currentQuarter, carrierFilters]);
+  const visiblePlans = useMemo(() => {
+    if (!search.trim()) return tablePlans;
+    const q = search.toLowerCase();
+    return tablePlans.filter((p) => p.plan_name.toLowerCase().includes(q));
+  }, [tablePlans, search]);
 
-  const totalPages = Math.max(1, Math.ceil(tablePlans.length / PAGE_SIZE));
+  // Reset page when filters or search change
+  useEffect(() => { setPage(1); }, [currentYear, currentQuarter, carrierFilters, search]);
+
+  const totalPages = Math.max(1, Math.ceil(visiblePlans.length / PAGE_SIZE));
   const paginatedPlans = useMemo(
-    () => tablePlans.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
-    [tablePlans, page]
+    () => visiblePlans.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
+    [visiblePlans, page]
   );
 
   // ── Auto-find the renewal counterpart for a given plan ────────────
@@ -450,6 +458,16 @@ export function ComparisonTab() {
 
       {/* ── Browse filters ─────────────────────────────────────────── */}
       <div className="flex flex-wrap items-center gap-3">
+        <div className="relative">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search plans..."
+            className="pl-8 w-[200px] h-9"
+          />
+        </div>
+
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-xs text-muted-foreground font-medium">Carriers:</span>
           {CARRIERS.map((c) => {
@@ -512,9 +530,11 @@ export function ComparisonTab() {
         <div className="flex-1 min-w-0">
           {loadingPlans ? (
             <div className="text-center py-12 text-muted-foreground">Loading plans…</div>
-          ) : tablePlans.length === 0 ? (
+          ) : visiblePlans.length === 0 ? (
             <div className="text-center py-12 text-muted-foreground">
-              No plans found. Select a period or upload PDFs first.
+              {tablePlans.length === 0
+                ? "No plans found. Select a period or upload PDFs first."
+                : `No plans match "${search}".`}
             </div>
           ) : viewMode === "list" ? (
             <div className="border rounded-lg overflow-auto">
@@ -665,10 +685,10 @@ export function ComparisonTab() {
             </div>
           )}
 
-          {tablePlans.length > 0 && (
+          {visiblePlans.length > 0 && (
             <div className="flex items-center justify-between mt-3">
               <p className="text-xs text-muted-foreground">
-                Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, tablePlans.length)} of {tablePlans.length} plan{tablePlans.length !== 1 ? "s" : ""}
+                Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, visiblePlans.length)} of {visiblePlans.length} plan{visiblePlans.length !== 1 ? "s" : ""}
               </p>
               {totalPages > 1 && (
                 <div className="flex items-center gap-2">
