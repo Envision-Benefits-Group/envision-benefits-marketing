@@ -1,3 +1,4 @@
+import structlog
 from difflib import SequenceMatcher
 from typing import List, Optional
 
@@ -7,6 +8,8 @@ from sqlalchemy.orm import selectinload
 
 from src.extraction.schemas import InsurancePlan
 from src.plans.models import MedicalPlanDetails, Plan
+
+logger = structlog.get_logger(__name__)
 
 
 MEDICAL_DETAIL_FIELDS = [
@@ -88,15 +91,25 @@ async def save_plans(
     updated_exact = 0
     updated_fuzzy = 0
 
+    logger.info("Saving plans to DB", total=len(plans))
+
     for plan_data in plans:
         quarter = plan_data.quarter.strip().upper()
         plan_id = Plan.generate_plan_id(
             plan_data.carrier, plan_data.plan_name, plan_data.year, quarter
         )
+        log = logger.bind(
+            carrier=plan_data.carrier,
+            plan_name=plan_data.plan_name,
+            year=plan_data.year,
+            quarter=quarter,
+            plan_id=plan_id,
+        )
 
         # 1. Try exact hash match (eagerly load medical_details)
         existing = await _get_plan_with_details(session, plan_id)
         if existing:
+            log.info("Exact match found, updating plan")
             _update_plan_fields(existing, plan_data)
             if existing.medical_details:
                 _update_medical_details(existing.medical_details, plan_data)
@@ -132,6 +145,11 @@ async def save_plans(
                 fuzzy_match = candidate
 
         if fuzzy_match:
+            log.info(
+                "Fuzzy match found, replacing plan",
+                matched_plan_name=fuzzy_match.plan_name,
+                match_ratio=round(best_ratio, 3),
+            )
             # Delete the old plan entirely (cascade deletes medical_details)
             await session.delete(fuzzy_match)
             await session.flush()
@@ -148,6 +166,7 @@ async def save_plans(
             continue
 
         # 3. No match — insert new
+        log.info("No match found, inserting new plan")
         new_plan = Plan(
             plan_id=plan_id,
             plan_type="Medical",
@@ -161,6 +180,12 @@ async def save_plans(
         inserted += 1
 
     await session.commit()
+    logger.info(
+        "DB save complete",
+        inserted=inserted,
+        updated_exact=updated_exact,
+        updated_fuzzy=updated_fuzzy,
+    )
     return {
         "inserted": inserted,
         "updated_exact": updated_exact,
@@ -218,8 +243,10 @@ async def get_plan_by_id(session: AsyncSession, plan_id: str) -> Optional[Plan]:
 async def update_plan(
     session: AsyncSession, plan_id: str, updates: dict
 ) -> Optional[Plan]:
+    logger.info("Updating plan", plan_id=plan_id, fields=list(updates.keys()))
     plan = await _get_plan_with_details(session, plan_id)
     if not plan:
+        logger.warning("Plan not found for update", plan_id=plan_id)
         return None
 
     plan_fields = {"carrier", "plan_name", "ee_only", "ee_spouse", "ee_children", "family"}
@@ -238,4 +265,5 @@ async def update_plan(
 
     await session.commit()
     await session.refresh(plan)
+    logger.info("Plan updated successfully", plan_id=plan_id)
     return plan

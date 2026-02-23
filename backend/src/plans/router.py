@@ -1,4 +1,5 @@
 import pandas as pd
+import structlog
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
@@ -20,6 +21,7 @@ from src.plans.repository import (
 from src.plans.schemas import ComparisonRequest, PlanResponse, PlanUpdate
 
 router = APIRouter()
+logger = structlog.get_logger(__name__)
 
 VALID_QUARTERS = {"Q1", "Q2", "Q3", "Q4"}
 
@@ -126,6 +128,8 @@ async def download_master_template(
             detail=f"Invalid quarter '{quarter}'. Must be one of: Q1, Q2, Q3, Q4",
         )
 
+    logger.info("Master template requested", year=year, quarter=quarter)
+
     stmt = (
         select(Plan)
         .options(selectinload(Plan.medical_details))
@@ -136,15 +140,18 @@ async def download_master_template(
     plans = result.scalars().all()
 
     if not plans:
+        logger.warning("No plans found for master template", year=year, quarter=quarter)
         raise HTTPException(
             status_code=404,
             detail=f"No plans found for {quarter} {year}.",
         )
 
+    logger.info("Generating master template Excel", plan_count=len(plans), year=year, quarter=quarter)
     rows = [_plan_to_row(plan) for plan in plans]
     df = pd.DataFrame(rows)
     generator = ExcelReportGenerator()
     excel_file = generator.generate(df)
+    logger.info("Master template generated successfully", filename=f"Master-Template-{quarter}-{year}.xlsx")
 
     filename = f"Master-Template-{quarter}-{year}.xlsx"
     return StreamingResponse(
@@ -169,12 +176,27 @@ async def generate_comparison_template(
     if not body.current_plan_ids and not body.renewal_plan_ids and not body.option_plan_ids:
         raise HTTPException(status_code=400, detail="No plan IDs provided.")
 
+    logger.info(
+        "Comparison template requested",
+        current_count=len(body.current_plan_ids),
+        renewal_count=len(body.renewal_plan_ids),
+        option_count=len(body.option_plan_ids),
+    )
+
     current_plans = await get_plans_by_ids(db, body.current_plan_ids)
     renewal_plans = await get_plans_by_ids(db, body.renewal_plan_ids)
     option_plans  = await get_plans_by_ids(db, body.option_plan_ids)
 
     if not current_plans and not renewal_plans and not option_plans:
+        logger.warning("No plans resolved from provided IDs")
         raise HTTPException(status_code=404, detail="No plans found for the provided IDs.")
+
+    logger.info(
+        "Plans resolved, generating comparison Excel",
+        current_resolved=len(current_plans),
+        renewal_resolved=len(renewal_plans),
+        options_resolved=len(option_plans),
+    )
 
     current_df = pd.DataFrame([_plan_to_row(p) for p in current_plans]) if current_plans else pd.DataFrame()
     renewal_df = pd.DataFrame([_plan_to_row(p) for p in renewal_plans]) if renewal_plans else pd.DataFrame()
@@ -182,6 +204,7 @@ async def generate_comparison_template(
 
     generator = ComparisonExcelGenerator()
     excel_file = generator.generate(current_df, renewal_df, options_df)
+    logger.info("Comparison template generated successfully")
 
     filename = "Marketing-Renewal-Comparison.xlsx"
     return StreamingResponse(
@@ -200,7 +223,10 @@ async def patch_plan(
     updates = body.model_dump(exclude_unset=True)
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update.")
+    logger.info("Patch plan request", plan_id=plan_id, fields=list(updates.keys()))
     plan = await update_plan(db, plan_id, updates)
     if not plan:
+        logger.warning("Plan not found for patch", plan_id=plan_id)
         raise HTTPException(status_code=404, detail="Plan not found.")
+    logger.info("Plan patched successfully", plan_id=plan_id)
     return plan

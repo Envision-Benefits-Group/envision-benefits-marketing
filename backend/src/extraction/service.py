@@ -1,9 +1,12 @@
 import os
+import structlog
 from io import BytesIO
 from openai import AsyncOpenAI
 from fastapi import HTTPException
 
 from .schemas import PlanList, DetectedQuarters
+
+logger = structlog.get_logger(__name__)
 
 API_KEY = os.getenv("OPENAI_API_KEY")
 
@@ -26,11 +29,17 @@ async def upload_pdf(file_content: bytes) -> str:
     if not file_content or not file_content.startswith(b"%PDF"):
         raise HTTPException(status_code=400, detail="Uploaded file does not appear to be a valid PDF.")
 
-    uploaded = await client.files.create(
-        file=("rates.pdf", BytesIO(file_content), "application/pdf"),
-        purpose="user_data",
-    )
-    return uploaded.id
+    logger.info("Uploading PDF to OpenAI", file_size_bytes=len(file_content))
+    try:
+        uploaded = await client.files.create(
+            file=("rates.pdf", BytesIO(file_content), "application/pdf"),
+            purpose="user_data",
+        )
+        logger.info("PDF uploaded successfully", file_id=uploaded.id)
+        return uploaded.id
+    except Exception as e:
+        logger.error("PDF upload to OpenAI failed", error=str(e))
+        raise
 
 
 async def detect_quarters(file_id: str) -> list[str]:
@@ -39,6 +48,7 @@ async def detect_quarters(file_id: str) -> list[str]:
     Returns e.g. ["Q1", "Q2"] or ["Q1", "Q2", "Q3", "Q4"].
     """
     client = get_client()
+    logger.info("Detecting quarters in document", file_id=file_id)
 
     try:
         resp = await client.responses.parse(
@@ -47,8 +57,13 @@ async def detect_quarters(file_id: str) -> list[str]:
             instructions=(
                 "You are analyzing an insurance document. "
                 "Identify which quarters (Q1, Q2, Q3, Q4) have rate data in this document. "
-                "Only include quarters that have actual rate tables or pricing. "
-                "If the document has rates with no quarter distinction, return ['Q1']."
+                "Map effective date ranges to quarters: Jan–Mar = Q1, Apr–Jun = Q2, Jul–Sep = Q3, Oct–Dec = Q4. "
+                "Examples: 'Quote Effective: 10/01/2025 - 12/31/2025' → Q4. "
+                "'Effective: 01/01/2026 - 03/31/2026' → Q1. "
+                "'Effective: 04/01/2025 - 06/30/2025' → Q2. "
+                "If the document contains multiple distinct quarterly rate tables, return all applicable quarters. "
+                "If the document spans a full calendar year (Jan–Dec) or has no date information at all, return ['Q1', 'Q2', 'Q3', 'Q4']. "
+                "Only include quarters that have actual rate tables or pricing."
             ),
             input=[
                 {
@@ -64,15 +79,22 @@ async def detect_quarters(file_id: str) -> list[str]:
 
         result: DetectedQuarters | None = resp.output_parsed
         if not result or not result.quarters:
+            logger.warning("Quarter detection returned empty result, defaulting to Q1", file_id=file_id)
             return ["Q1"]
 
         # Normalize and validate
         valid = {"Q1", "Q2", "Q3", "Q4"}
         quarters = [q.strip().upper() for q in result.quarters if q.strip().upper() in valid]
-        return sorted(quarters) if quarters else ["Q1"]
+        final = sorted(quarters) if quarters else ["Q1"]
+        logger.info("Quarters detected", file_id=file_id, quarters=final)
+        return final
 
     except Exception as e:
-        print(f"Quarter detection error: {str(e)}")
+        logger.error(
+            "Quarter detection failed, falling back to all quarters",
+            file_id=file_id,
+            error=str(e),
+        )
         # Fallback: assume all 4 quarters
         return ["Q1", "Q2", "Q3", "Q4"]
 
@@ -84,6 +106,7 @@ async def extract_from_pdf(file_id: str, target_quarter: str) -> list:
     Returns a list of InsurancePlan dicts.
     """
     client = get_client()
+    logger.info("Starting plan extraction", file_id=file_id, quarter=target_quarter)
 
     system_rules = f"""
 You are a specialized health insurance data extractor.
@@ -96,7 +119,8 @@ STRICT COMPLIANCE RULES:
 4. OOP MAX: Extract OOP Max for both In-Network (oop_max_in_ee, oop_max_in_fam) and Out-of-Network (oop_max_oon_ee, oop_max_oon_fam).
 5. FORMATTING: Remove 'FS' from coinsurance strings.
 6. VERBIAGE: Convert all cost descriptions like '$ after deductible' to 'Deductible then $'.
-7. RATES: Use ONLY the 'Dependent age 26' tables.
+7. RATES: When the document contains multiple rate tables segmented by dependent age (e.g. "Dependent age 26" vs "Dependent age 29"), use ONLY the 'Dependent age 26' table. If the document has a single rate table with no age-tier distinction (such as HealthyNY or other single-table plans), use that table as-is. Never skip a plan solely because it lacks an age-labeled table.
+   RATE LABEL MAPPING: Map these alternative labels to the correct fields — "Single" or "EE Only" or "Employee Only" → ee_only; "Subscriber & Spouse" or "EE + Spouse" or "Employee + Spouse" → ee_spouse; "Subscriber & Child(ren)" or "EE + Child(ren)" or "Employee + Children" → ee_children; "Family" → family.
 8. YEAR: Extract the effective year of the plan rates from the document (e.g. 2025, 2026). Look for phrases like "Effective Date", "Plan Year", or date ranges indicating the coverage period.
 9. If there are no rates for {target_quarter} in this document, return an empty plans list.
 10. SKIP: Do NOT extract Vision or Dental plans. Only extract Medical/Health insurance plans.
@@ -151,10 +175,23 @@ STRICT COMPLIANCE RULES:
 
         structured: PlanList | None = resp.output_parsed
         if not structured or not structured.plans:
+            logger.warning("No plans extracted from document", file_id=file_id, quarter=target_quarter)
             return []
 
-        return [plan.model_dump() for plan in structured.plans]
+        plan_list = [plan.model_dump() for plan in structured.plans]
+        logger.info(
+            "Plan extraction complete",
+            file_id=file_id,
+            quarter=target_quarter,
+            plan_count=len(plan_list),
+        )
+        return plan_list
 
     except Exception as e:
-        print(f"GPT Extraction Error ({target_quarter}): {str(e)}")
+        logger.error(
+            "GPT extraction failed",
+            file_id=file_id,
+            quarter=target_quarter,
+            error=str(e),
+        )
         raise
