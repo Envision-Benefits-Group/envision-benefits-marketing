@@ -54,6 +54,12 @@ class PlanResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class ComparisonRequest(BaseModel):
+    current_plan_ids: list[str] = []   # enrolled plans — old (current year) pricing
+    renewal_plan_ids: list[str] = []   # renewal pricing for the same plans, matched by position
+    option_plan_ids: list[str] = []    # alternative plans shown in <Carrier> Opts tabs
+
+
 class PlanUpdate(BaseModel):
     carrier: Optional[str] = None
     plan_name: Optional[str] = None

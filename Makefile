@@ -80,3 +80,48 @@ init: wait_for_db
 init-prod: wait_for_db
 	docker compose -p project-name-prod exec -i backend alembic upgrade head
 	docker compose -p project-name-prod exec -i backend python init_db.py
+
+# ── Database inspection commands ──
+
+# Show all plans in the database
+db-plans:
+	docker compose exec db psql -U $(POSTGRES_USER) -d $(POSTGRES_DB) -c "SELECT plan_id, plan_type, carrier, plan_name, year, quarter, ee_only, created_at FROM plans ORDER BY carrier, plan_name;"
+
+# Count plans per carrier/quarter
+db-summary:
+	docker compose exec db psql -U $(POSTGRES_USER) -d $(POSTGRES_DB) -c "SELECT carrier, quarter, year, COUNT(*) as plan_count FROM plans GROUP BY carrier, quarter, year ORDER BY carrier, quarter;"
+
+# Show medical details for a specific plan (usage: make db-plan-details ID=<plan_id>)
+db-plan-details:
+	docker compose exec db psql -U $(POSTGRES_USER) -d $(POSTGRES_DB) -c "SELECT p.carrier, p.plan_name, m.* FROM plans p JOIN medical_plan_details m USING (plan_id) WHERE p.plan_id = '$(ID)';"
+
+# List all tables and row counts
+db-tables:
+	docker compose exec db psql -U $(POSTGRES_USER) -d $(POSTGRES_DB) -c "SELECT 'plans' as table_name, COUNT(*) FROM plans UNION ALL SELECT 'medical_plan_details', COUNT(*) FROM medical_plan_details;"
+
+# Open interactive psql shell
+db-shell:
+	docker compose exec db psql -U $(POSTGRES_USER) -d $(POSTGRES_DB)
+
+# ── Database reset commands ──
+
+# Clear all plan data (keeps tables intact)
+db-clear:
+	docker compose exec db psql -U $(POSTGRES_USER) -d $(POSTGRES_DB) -c "TRUNCATE plans CASCADE;"
+	@echo "All plan data cleared."
+
+# Full reset: drop tables and re-run migrations
+db-reset: wait_for_db
+	docker compose exec backend alembic downgrade base
+	docker compose exec backend alembic upgrade head
+	@echo "Database reset complete — tables recreated."
+
+# Nuclear option: destroy the entire postgres volume and start fresh
+db-nuke:
+	@echo "WARNING: This will destroy ALL data in the database."
+	docker compose down -v
+	docker compose up -d db
+	@echo "Waiting for DB to start..."
+	sleep 3
+	docker compose up -d backend
+	@echo "Run 'make migrate' to recreate tables."

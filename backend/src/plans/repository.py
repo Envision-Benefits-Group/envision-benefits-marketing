@@ -168,6 +168,36 @@ async def save_plans(
     }
 
 
+async def browse_plans(
+    session: AsyncSession,
+    carrier: Optional[str] = None,
+    year: Optional[int] = None,
+    quarter: Optional[str] = None,
+) -> List[Plan]:
+    stmt = select(Plan).options(selectinload(Plan.medical_details))
+    if carrier:
+        stmt = stmt.where(Plan.carrier == carrier)
+    if year:
+        stmt = stmt.where(Plan.year == year)
+    if quarter:
+        stmt = stmt.where(Plan.quarter == quarter.strip().upper())
+    stmt = stmt.order_by(Plan.carrier, Plan.plan_name)
+    result = await session.execute(stmt)
+    return result.scalars().all()
+
+
+async def get_plans_by_ids(
+    session: AsyncSession, plan_ids: List[str]
+) -> List[Plan]:
+    stmt = (
+        select(Plan)
+        .options(selectinload(Plan.medical_details))
+        .where(Plan.plan_id.in_(plan_ids))
+    )
+    result = await session.execute(stmt)
+    return result.scalars().all()
+
+
 async def get_plans_by_quarter(
     session: AsyncSession, year: int, quarter: str
 ) -> List[Plan]:

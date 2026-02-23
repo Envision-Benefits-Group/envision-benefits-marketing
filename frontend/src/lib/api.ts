@@ -106,6 +106,38 @@ api.interceptors.response.use(
   }
 );
 
+import type { BrowseFilters, ComparisonRequest, IngestResponse, Plan } from "@/types/plans";
+
+// Plans API functions
+export const plansApi = {
+  browse: (params: BrowseFilters) =>
+    api.get<Plan[]>("/plans/browse", { params }),
+  update: (planId: string, data: Partial<Plan>) =>
+    api.patch<Plan>(`/plans/${planId}`, data),
+  downloadMasterTemplate: (year: number, quarter: string) =>
+    api.get("/plans/master-template", {
+      params: { year, quarter },
+      responseType: "blob",
+    }),
+  generateComparison: (data: ComparisonRequest) =>
+    api.post("/plans/comparison-template", data, { responseType: "blob" }),
+};
+
+// Extraction API functions (uses API key auth, not JWT)
+export const extractionApi = {
+  ingest: (files: File[], quarter?: string) => {
+    const formData = new FormData();
+    files.forEach((file) => formData.append("files", file));
+    if (quarter) formData.append("quarter", quarter);
+    return api.post<IngestResponse>("/extraction/ingest", formData, {
+      headers: {
+        "Content-Type": "multipart/form-data",
+        "x-api-key": process.env.NEXT_PUBLIC_API_KEY || "test-secret-key",
+      },
+    });
+  },
+};
+
 // User API functions
 export const userAPI = {
   getCurrentUser: () => api.get("/auth/user/current_user"),
