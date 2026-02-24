@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from src.logging_config import setup_logging
 from src.extraction import router as extraction_router
+from src.plans import router as plans_router
 from starlette.requests import Request
 from structlog.contextvars import (bind_contextvars, clear_contextvars)
 
@@ -49,6 +50,7 @@ async def add_context_to_logs(request: Request, call_next):
     return response
 
 app.include_router(extraction_router.router, tags=["Extraction"], prefix="/extraction")
+app.include_router(plans_router.router, tags=["Plans"], prefix="/plans")
 
 # Root endpoint
 @app.get("/")

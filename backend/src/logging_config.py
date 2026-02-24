@@ -1,5 +1,6 @@
 import logging
 import os
+import sys
 
 import structlog
 from structlog.contextvars import merge_contextvars
@@ -8,17 +9,29 @@ from structlog.contextvars import merge_contextvars
 def setup_logging():
     """
     Configures the logging for the application using structlog.
+    Logs are written to both logs/app.log and stdout (terminal).
     """
     # Ensure the logs directory exists
     os.makedirs("logs", exist_ok=True)
 
-    # Set up basic file logging with the built-in logging module
-    logging.basicConfig(
-        filename="logs/app.log",  # Log file location
-        level=logging.INFO,
-        format="%(message)s",
-        force=True,
-    )
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
+
+    # Avoid adding duplicate handlers on reload
+    if not root_logger.handlers:
+        fmt = logging.Formatter("%(message)s")
+
+        # File handler — persisted JSON logs
+        file_handler = logging.FileHandler("logs/app.log")
+        file_handler.setLevel(logging.INFO)
+        file_handler.setFormatter(fmt)
+        root_logger.addHandler(file_handler)
+
+        # Console handler — visible in terminal
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setLevel(logging.INFO)
+        console_handler.setFormatter(fmt)
+        root_logger.addHandler(console_handler)
 
     # Custom processor to rename fields for clarity in logs
     def rename_fields(_, __, event_dict):

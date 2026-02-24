@@ -5,6 +5,8 @@ from typing import Optional, List
 class InsurancePlan(BaseModel):
     carrier: str = Field(description="Carrier")
     plan_name: str = Field(description="Full plan name")
+    year: int = Field(description="Effective year of the plan rates (e.g. 2026)")
+    quarter: str = Field(description="Quarter the rates apply to (Q1, Q2, Q3, or Q4). If rates span the full year, use Q1.")
 
     in_network_deductible_type: str = Field(description="T for True Family or E for Embedded")
     out_network_deductible_type: str = Field(description="T for True Family or E for Embedded")
@@ -45,3 +47,6 @@ class InsurancePlan(BaseModel):
 
 class PlanList(BaseModel):
     plans: List[InsurancePlan]
+
+class DetectedQuarters(BaseModel):
+    quarters: List[str] = Field(description="List of quarters found in the document (e.g. ['Q1', 'Q2', 'Q3', 'Q4'])")
