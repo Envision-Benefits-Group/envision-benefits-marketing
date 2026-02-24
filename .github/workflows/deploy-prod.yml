@@ -20,7 +20,7 @@ jobs:
           script: |
             cd envision-benefits-marketing/
 
-            sudo docker-compose down
+            sudo docker compose down
             
             git checkout master
 
@@ -28,7 +28,7 @@ jobs:
             git pull origin master
 
             # Rebuild and run everything
-            sudo docker-compose up -d --build
+            sudo docker compose up -d --build
 
             # Run migrations and init data
             make init

@@ -66,29 +66,6 @@ services:
       - traefik_network
     restart: always
 
-  # Database Backup Service
-  db_backup:
-    image: kartoza/pg-backup:17-3.5  # Use the version matching your PostgreSQL version
-    container_name: postgres_db_backup
-    env_file:
-      - .env  # Contains database credentials and other environment variables
-    environment:
-      POSTGRES_HOST: db
-      POSTGRES_PORT: 5432
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASS: ${POSTGRES_PASSWORD}
-      POSTGRES_DBNAME: ${POSTGRES_DB}
-      DUMPPREFIX: "PG"
-      CRON_SCHEDULE: "0 2 * * *"  # Run daily at 2 AM
-#      REMOVE_BEFORE: 7  # Keep backups for 7 days
-    volumes:
-      - ./backups:/backups  # Mount the host backups directory
-    depends_on:
-      - db
-    networks:
-      - traefik_network  # Use your existing network
-    restart: always
-
   # Qdrant Vector Database
 #  qdrant:
 #    image: qdrant/qdrant:v1.14.0
