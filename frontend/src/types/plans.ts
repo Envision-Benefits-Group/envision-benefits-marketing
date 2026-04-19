@@ -55,6 +55,21 @@ export interface ComparisonRequest {
   current_plan_ids: string[];   // enrolled plans — old pricing
   renewal_plan_ids: string[];   // renewal pricing for same plans (matched by position)
   option_plan_ids: string[];    // alternative plans for Opts tabs
+  member_counts?: MemberCounts[];
+}
+
+export interface MemberCounts {
+  ee: number;
+  spouse: number;
+  children: number;
+  family: number;
+}
+
+export interface AutoRenewalRequest {
+  renewal_effective_date: string;  // YYYY-MM-DD
+  enrolled_plan_ids: string[];     // plan IDs from the RENEWAL period
+  option_plan_ids: string[];
+  member_counts?: MemberCounts[];
 }
 
 export interface IngestQuarterResult {
