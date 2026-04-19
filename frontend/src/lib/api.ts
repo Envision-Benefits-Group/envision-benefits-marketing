@@ -106,7 +106,7 @@ api.interceptors.response.use(
   }
 );
 
-import type { BrowseFilters, ComparisonRequest, IngestResponse, Plan } from "@/types/plans";
+import type { AutoRenewalRequest, BrowseFilters, ComparisonRequest, IngestResponse, Plan } from "@/types/plans";
 
 // Plans API functions
 export const plansApi = {
@@ -121,6 +121,8 @@ export const plansApi = {
     }),
   generateComparison: (data: ComparisonRequest) =>
     api.post("/plans/comparison-template", data, { responseType: "blob" }),
+  generateAutoRenewal: (data: AutoRenewalRequest) =>
+    api.post("/plans/auto-renewal", data, { responseType: "blob" }),
 };
 
 // Extraction API functions (uses API key auth, not JWT)
