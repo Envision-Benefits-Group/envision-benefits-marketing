@@ -1,5 +1,6 @@
 import pandas as pd
 import structlog
+from datetime import date, datetime
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
@@ -13,17 +14,25 @@ from src.extraction.comparison_generator import ComparisonExcelGenerator
 from src.plans.models import Plan
 from src.plans.repository import (
     browse_plans,
+    find_prior_year_plan,
     get_plan_by_id,
     get_plans_by_ids,
     get_plans_by_quarter,
     update_plan,
 )
-from src.plans.schemas import ComparisonRequest, PlanResponse, PlanUpdate
+from src.plans.schemas import AutoRenewalRequest, ComparisonRequest, MemberCounts, PlanResponse, PlanUpdate
 
 router = APIRouter()
 logger = structlog.get_logger(__name__)
 
 VALID_QUARTERS = {"Q1", "Q2", "Q3", "Q4"}
+
+MONTH_TO_QUARTER = {
+    1: "Q1", 2: "Q1", 3: "Q1",
+    4: "Q2", 5: "Q2", 6: "Q2",
+    7: "Q3", 8: "Q3", 9: "Q3",
+    10: "Q4", 11: "Q4", 12: "Q4",
+}
 
 
 def _plan_to_row(plan: Plan) -> dict:
@@ -202,8 +211,23 @@ async def generate_comparison_template(
     renewal_df = pd.DataFrame([_plan_to_row(p) for p in renewal_plans]) if renewal_plans else pd.DataFrame()
     options_df  = pd.DataFrame([_plan_to_row(p) for p in option_plans])  if option_plans  else pd.DataFrame()
 
+    # Build member counts list from request
+    count_dicts = []
+    for i in range(len(current_plans)):
+        if i < len(body.member_counts):
+            c = body.member_counts[i]
+            count_dicts.append({
+                "count_ee": c.ee, "count_sp": c.spouse,
+                "count_ch": c.children, "count_fam": c.family,
+            })
+        else:
+            count_dicts.append({
+                "count_ee": 0, "count_sp": 0,
+                "count_ch": 0, "count_fam": 0,
+            })
+
     generator = ComparisonExcelGenerator()
-    excel_file = generator.generate(current_df, renewal_df, options_df)
+    excel_file = generator.generate(current_df, renewal_df, options_df, count_dicts)
     logger.info("Comparison template generated successfully")
 
     filename = "Marketing-Renewal-Comparison.xlsx"
@@ -230,3 +254,134 @@ async def patch_plan(
         raise HTTPException(status_code=404, detail="Plan not found.")
     logger.info("Plan patched successfully", plan_id=plan_id)
     return plan
+
+
+@router.post("/auto-renewal")
+async def generate_auto_renewal(
+    body: AutoRenewalRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Automated Renewal Grid generation.
+
+    Given a renewal effective date and enrolled plan IDs (from the renewal period),
+    the system:
+    1. Derives the quarter from the effective date month
+    2. Fetches each enrolled renewal plan
+    3. Finds the prior-year same-quarter version of each plan (the "current" rate)
+    4. Generates the comparison Excel with Current vs Renewal + Options tabs
+
+    Example: renewal_effective_date = "2026-04-01"
+      → renewal quarter = Q2, renewal year = 2026
+      → current quarter = Q2, current year = 2025
+      → matches FlexFit Platinum Q2 2025 ↔ FlexFit Platinum Q2 2026
+    """
+    # Parse the effective date
+    try:
+        eff_date = datetime.strptime(body.renewal_effective_date, "%Y-%m-%d").date()
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid date format: '{body.renewal_effective_date}'. Use YYYY-MM-DD.",
+        )
+
+    renewal_quarter = MONTH_TO_QUARTER[eff_date.month]
+    renewal_year = eff_date.year
+    prior_year = renewal_year - 1
+
+    logger.info(
+        "Auto-renewal requested",
+        effective_date=body.renewal_effective_date,
+        renewal_quarter=renewal_quarter,
+        renewal_year=renewal_year,
+        prior_year=prior_year,
+        enrolled_count=len(body.enrolled_plan_ids),
+        option_count=len(body.option_plan_ids),
+    )
+
+    if not body.enrolled_plan_ids:
+        raise HTTPException(status_code=400, detail="No enrolled plan IDs provided.")
+
+    # Fetch the renewal plans
+    renewal_plans = await get_plans_by_ids(db, body.enrolled_plan_ids)
+    if not renewal_plans:
+        raise HTTPException(
+            status_code=404,
+            detail="No plans found for the provided enrolled plan IDs.",
+        )
+
+    # For each renewal plan, find the prior-year counterpart
+    current_plans = []
+    paired_renewal_plans = []
+    unpaired = []
+
+    for rplan in renewal_plans:
+        prior = await find_prior_year_plan(
+            db, rplan.carrier, rplan.plan_name, prior_year, renewal_quarter,
+        )
+        if prior:
+            current_plans.append(prior)
+            paired_renewal_plans.append(rplan)
+            logger.info(
+                "Paired plan",
+                plan_name=rplan.plan_name,
+                carrier=rplan.carrier,
+                current=f"{prior.quarter} {prior.year}",
+                renewal=f"{rplan.quarter} {rplan.year}",
+            )
+        else:
+            unpaired.append(rplan.plan_name)
+            logger.warning(
+                "No prior year match found",
+                plan_name=rplan.plan_name,
+                carrier=rplan.carrier,
+                target=f"{renewal_quarter} {prior_year}",
+            )
+
+    # Fetch option plans
+    option_plans = await get_plans_by_ids(db, body.option_plan_ids) if body.option_plan_ids else []
+
+    if not current_plans and not paired_renewal_plans:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Could not find prior year ({prior_year}) plans for any of the enrolled plans. "
+                   f"Make sure {renewal_quarter} {prior_year} data is ingested.",
+        )
+
+    # Build DataFrames
+    current_df = pd.DataFrame([_plan_to_row(p) for p in current_plans])
+    renewal_df = pd.DataFrame([_plan_to_row(p) for p in paired_renewal_plans])
+    options_df = pd.DataFrame([_plan_to_row(p) for p in option_plans]) if option_plans else pd.DataFrame()
+
+    # Add member counts to DataFrames if provided
+    counts_list = body.member_counts or []
+    count_dicts = []
+    for i in range(len(current_plans)):
+        if i < len(counts_list):
+            c = counts_list[i]
+            count_dicts.append({
+                "count_ee": c.ee, "count_sp": c.spouse,
+                "count_ch": c.children, "count_fam": c.family,
+            })
+        else:
+            count_dicts.append({
+                "count_ee": 0, "count_sp": 0,
+                "count_ch": 0, "count_fam": 0,
+            })
+
+    generator = ComparisonExcelGenerator()
+    excel_file = generator.generate(current_df, renewal_df, options_df, count_dicts)
+
+    logger.info(
+        "Auto-renewal grid generated",
+        paired=len(current_plans),
+        unpaired=unpaired,
+        options=len(option_plans),
+    )
+
+    filename = f"Renewal-Grid-{renewal_quarter}-{renewal_year}.xlsx"
+    return StreamingResponse(
+        excel_file,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
