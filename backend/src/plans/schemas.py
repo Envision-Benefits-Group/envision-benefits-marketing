@@ -54,10 +54,35 @@ class PlanResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class MemberCounts(BaseModel):
+    """Census counts for a single enrolled plan."""
+    ee: int = 0
+    spouse: int = 0
+    children: int = 0
+    family: int = 0
+
+
 class ComparisonRequest(BaseModel):
     current_plan_ids: list[str] = []   # enrolled plans — old (current year) pricing
     renewal_plan_ids: list[str] = []   # renewal pricing for the same plans, matched by position
     option_plan_ids: list[str] = []    # alternative plans shown in <Carrier> Opts tabs
+    member_counts: list[MemberCounts] = []  # census per enrolled plan, matched by position to current_plan_ids
+
+
+class AutoRenewalRequest(BaseModel):
+    """
+    Automated renewal grid generation.
+    
+    Given a renewal effective date, the system:
+    1. Derives the renewal quarter from the effective month
+    2. Looks up the prior-year same-quarter rates as "current"
+    3. Matches enrolled plan names across years
+    4. Generates the comparison Excel
+    """
+    renewal_effective_date: str  # ISO date string, e.g. "2026-04-01"
+    enrolled_plan_ids: list[str] = []  # plan IDs from the RENEWAL period that the client is enrolled in
+    option_plan_ids: list[str] = []    # alternative plans to show in Opts tabs
+    member_counts: list[MemberCounts] = []  # census per enrolled plan
 
 
 class PlanUpdate(BaseModel):
