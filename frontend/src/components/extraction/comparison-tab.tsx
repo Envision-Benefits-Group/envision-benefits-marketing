@@ -22,9 +22,9 @@ import {
 } from "@/components/ui/table";
 import { SelectedPlansPanel } from "@/components/plans/selected-plans-panel";
 import { plansApi } from "@/lib/api";
-import { ChevronLeft, ChevronRight, GripVertical, LayoutGrid, List, Plus, Search, X } from "lucide-react";
+import { CalendarDays, ChevronLeft, ChevronRight, GripVertical, LayoutGrid, List, Plus, Search, X, Zap } from "lucide-react";
 import { Input } from "@/components/ui/input";
-import type { Plan } from "@/types/plans";
+import type { Plan, MemberCounts } from "@/types/plans";
 
 const CARRIERS = ["IHA", "Highmark", "Univera", "Excellus"];
 const YEARS = [2024, 2025, 2026, 2027];
@@ -80,6 +80,10 @@ export function ComparisonTab() {
 
   const [isGenerating, setIsGenerating] = useState(false);
   const [dropTarget, setDropTarget] = useState<"current" | "option" | null>(null);
+
+  // ── Auto-Renewal state ─────────────────────────────────────────────
+  const [renewalDate, setRenewalDate] = useState<string>("");
+  const [isAutoGenerating, setIsAutoGenerating] = useState(false);
 
   // Refs so the re-pair effect can read latest state without circular deps
   const latestCurrentIds     = useRef(selectedCurrentIds);
@@ -338,6 +342,46 @@ export function ComparisonTab() {
     }
   };
 
+  // ── Auto-Renewal Generate ─────────────────────────────────────────
+  const handleAutoRenewal = async () => {
+    if (!renewalDate) {
+      toast.error("Enter a renewal effective date");
+      return;
+    }
+    // Need at least selected renewal-period plans (the enrolled plans)
+    const renewalIds = Array.from(selectedRenewalIds);
+    const currentIds = Array.from(selectedCurrentIds);
+    // Use renewal IDs if available, otherwise fall back to current IDs
+    const enrolledIds = renewalIds.length > 0 ? renewalIds : currentIds;
+    const optionIds = Array.from(selectedOptionIds);
+
+    if (!enrolledIds.length) {
+      toast.error("Select the enrolled plans first (from the renewal period), then click Auto-Renewal");
+      return;
+    }
+
+    setIsAutoGenerating(true);
+    try {
+      const { data } = await plansApi.generateAutoRenewal({
+        renewal_effective_date: renewalDate,
+        enrolled_plan_ids: enrolledIds,
+        option_plan_ids: optionIds,
+      });
+      const url = window.URL.createObjectURL(new Blob([data]));
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `Renewal-Grid-${renewalDate}.xlsx`;
+      a.click();
+      window.URL.revokeObjectURL(url);
+      toast.success("Auto-Renewal Grid downloaded");
+    } catch (err: any) {
+      const detail = err?.response?.data?.detail || "Failed to generate auto-renewal grid";
+      toast.error(detail);
+    } finally {
+      setIsAutoGenerating(false);
+    }
+  };
+
   // ── Selection state for row highlighting ──────────────────────────
   const getState = (planId: string) => {
     if (selectedCurrentIds.has(planId)) return "current";
@@ -372,6 +416,48 @@ export function ComparisonTab() {
 
   return (
     <div className="space-y-4">
+
+      {/* ── Auto-Renewal Quick Action ─────────────────────────────── */}
+      <div className="border-2 border-dashed border-blue-300 rounded-lg p-4 bg-blue-50/30">
+        <div className="flex items-center gap-2 mb-3">
+          <Zap className="h-4 w-4 text-blue-600" />
+          <p className="text-sm font-semibold text-blue-900">Auto-Renewal Grid</p>
+          <span className="text-xs text-blue-600 bg-blue-100 px-2 py-0.5 rounded-full">New</span>
+        </div>
+        <p className="text-xs text-blue-700 mb-3">
+          Enter the renewal effective date. The system will automatically find prior-year same-quarter
+          rates and generate the comparison grid. Select enrolled plans from the renewal period below first.
+        </p>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <CalendarDays className="h-4 w-4 text-blue-500" />
+            <Input
+              type="date"
+              value={renewalDate}
+              onChange={(e) => setRenewalDate(e.target.value)}
+              className="w-44 h-9 bg-white"
+              placeholder="Renewal date"
+            />
+          </div>
+          <Button
+            onClick={handleAutoRenewal}
+            disabled={isAutoGenerating || !renewalDate}
+            className="h-9 gap-2 bg-blue-600 hover:bg-blue-700"
+          >
+            <Zap className="h-3.5 w-3.5" />
+            {isAutoGenerating ? "Generating..." : "Generate Auto-Renewal"}
+          </Button>
+          {renewalDate && (
+            <span className="text-xs text-blue-600">
+              → Compares {(() => {
+                const d = new Date(renewalDate + "T00:00:00");
+                const q = `Q${Math.ceil((d.getMonth() + 1) / 3)}`;
+                return `${q} ${d.getFullYear() - 1} vs ${q} ${d.getFullYear()}`;
+              })()}
+            </span>
+          )}
+        </div>
+      </div>
 
       {/* ── Period selectors ───────────────────────────────────────── */}
       <div className="grid grid-cols-2 gap-4">
