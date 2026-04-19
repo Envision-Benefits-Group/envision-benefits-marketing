@@ -267,3 +267,57 @@ async def update_plan(
     await session.refresh(plan)
     logger.info("Plan updated successfully", plan_id=plan_id)
     return plan
+
+
+async def find_prior_year_plan(
+    session: AsyncSession,
+    carrier: str,
+    plan_name: str,
+    prior_year: int,
+    quarter: str,
+) -> Optional[Plan]:
+    """
+    Find the prior-year version of a plan by carrier + plan_name + year + quarter.
+    Uses exact match first, then fuzzy fallback.
+    """
+    quarter = quarter.strip().upper()
+
+    # 1. Exact match
+    exact_id = Plan.generate_plan_id(carrier, plan_name, prior_year, quarter)
+    exact = await _get_plan_with_details(session, exact_id)
+    if exact:
+        return exact
+
+    # 2. Fuzzy fallback — same carrier, quarter, prior year
+    stmt = (
+        select(Plan)
+        .options(selectinload(Plan.medical_details))
+        .where(
+            Plan.carrier == carrier,
+            Plan.quarter == quarter,
+            Plan.year == prior_year,
+            Plan.plan_type == "Medical",
+        )
+    )
+    result = await session.execute(stmt)
+    candidates = result.scalars().all()
+
+    incoming_name = _normalize_plan_name(plan_name, carrier)
+    best_match = None
+    best_ratio = 0.0
+    for candidate in candidates:
+        candidate_name = _normalize_plan_name(candidate.plan_name, candidate.carrier)
+        ratio = SequenceMatcher(None, candidate_name, incoming_name).ratio()
+        if ratio >= 0.75 and ratio > best_ratio:
+            best_ratio = ratio
+            best_match = candidate
+
+    if best_match:
+        logger.info(
+            "Fuzzy matched prior year plan",
+            carrier=carrier,
+            plan_name=plan_name,
+            matched_name=best_match.plan_name,
+            ratio=round(best_ratio, 3),
+        )
+    return best_match
