@@ -45,12 +45,10 @@ class ComparisonExcelGenerator(BaseExcelGenerator):
         ('coinsurance_oon',       'Coinsurance',                                      'benefit'),
         ('oop_oon_display',       'Out of Pocket Maximum (Employee / Family)',        'benefit'),
         ('SECTION_RX',            'Prescription Coverage',                            'section'),
-        ('rx_generic',            'Generic',                                          'benefit'),
-        ('rx_preferred_brand',    'Preferred Brand',                                  'benefit'),
-        ('rx_non_preferred_brand','Non-Preferred Brand',                              'benefit'),
+        ('rx_display',            'Rx (Generic / Preferred / Non-Preferred)',         'benefit'),
         ('SECTION_OTHER',         'Other',                                            'section'),
         ('hsa_qualified',         'HSA Qualified',                                    'benefit'),
-        ('creditable_coverage',   'Creditable Coverage',                              'benefit'),
+        ('creditable_coverage',   'Creditable Coverage / Medicare Part D',           'benefit'),
         ('dependent_coverage',    'Dependent Coverage',                               'benefit'),
         ('SECTION_COUNTS',        'Member Counts',                                    'section'),
         ('count_ee',              'Employee Only',                                    'count'),
@@ -126,7 +124,6 @@ class ComparisonExcelGenerator(BaseExcelGenerator):
         counts = member_counts or []
 
         # Pair current and renewal by position, group by carrier
-        # Also track the original position index for member counts
         n_pairs = min(len(current_processed), len(renewal_processed))
         pairs_by_carrier: dict[str, list] = defaultdict(list)
         counts_by_carrier: dict[str, list] = defaultdict(list)
@@ -160,7 +157,6 @@ class ComparisonExcelGenerator(BaseExcelGenerator):
                 self._build_current_renewal_sheet(ws, pairs, carrier, carrier_counts)
 
             # Reference sheet for cross-sheet formulas in Opts tabs
-            # (use the first enrolled carrier's sheet)
             ref_sheet = (
                 next(iter(current_renewal_sheet_names.values()))
                 if current_renewal_sheet_names
@@ -171,7 +167,6 @@ class ComparisonExcelGenerator(BaseExcelGenerator):
             for carrier, opt_plans in opts_by_carrier.items():
                 sheet_name = f"{carrier} Opts"[:31]
                 ws = self.workbook.add_worksheet(sheet_name)
-                # Pass the enrolled counts from the matching carrier's Current_Renewal tab
                 carrier_counts = counts_by_carrier.get(carrier, [])
                 self._build_opts_sheet(ws, opt_plans, carrier, ref_sheet, carrier_counts)
 
@@ -189,40 +184,40 @@ class ComparisonExcelGenerator(BaseExcelGenerator):
             'bold': True, 'border': 1, 'align': 'center', 'valign': 'vcenter',
             'fg_color': '#D9D9D9',
         })
-        # Bold variants for changed renewal cells
+        # Bold variants for changed renewal cells — vcenter alignment
         self.bold_cell_fmt = self.workbook.add_format({
-            'bold': True, 'text_wrap': True, 'valign': 'top',
+            'bold': True, 'text_wrap': True, 'valign': 'vcenter',
             'border': 1, 'align': 'center',
         })
         self.bold_currency_fmt = self.workbook.add_format({
-            'bold': True, 'text_wrap': True, 'valign': 'top',
+            'bold': True, 'text_wrap': True, 'valign': 'vcenter',
             'border': 1, 'align': 'center', 'num_format': '$#,##0.00',
         })
         self.bold_percent_fmt = self.workbook.add_format({
-            'bold': True, 'text_wrap': True, 'valign': 'top',
+            'bold': True, 'text_wrap': True, 'valign': 'vcenter',
             'border': 1, 'align': 'center', 'num_format': '0.00%',
         })
         # Bold left-aligned for total/diff/pct row labels
         self.bold_label_fmt = self.workbook.add_format({
-            'bold': True, 'text_wrap': True, 'valign': 'top',
+            'bold': True, 'text_wrap': True, 'valign': 'vcenter',
             'border': 1, 'align': 'left',
         })
         self.bold_currency_left_fmt = self.workbook.add_format({
-            'bold': True, 'text_wrap': True, 'valign': 'top',
+            'bold': True, 'text_wrap': True, 'valign': 'vcenter',
             'border': 1, 'align': 'left', 'num_format': '$#,##0.00',
         })
         self.bold_percent_left_fmt = self.workbook.add_format({
-            'bold': True, 'text_wrap': True, 'valign': 'top',
+            'bold': True, 'text_wrap': True, 'valign': 'vcenter',
             'border': 1, 'align': 'left', 'num_format': '0.00%',
         })
         # Bottom-border format for the Family (last rate) row
         self.rate_last_fmt_center = self.workbook.add_format({
-            'text_wrap': True, 'valign': 'top',
+            'text_wrap': True, 'valign': 'vcenter',
             'border': 1, 'align': 'center', 'num_format': '$#,##0.00',
             'bottom': 2,  # thick bottom border
         })
         self.rate_last_fmt_left = self.workbook.add_format({
-            'text_wrap': True, 'valign': 'top',
+            'text_wrap': True, 'valign': 'vcenter',
             'border': 1, 'align': 'left', 'num_format': '$#,##0.00',
             'bottom': 2,
         })
@@ -238,10 +233,8 @@ class ComparisonExcelGenerator(BaseExcelGenerator):
             return ''
         s = str(val).strip()
         s_lower = s.lower()
-        # Skip formatting for non-copay values
         if any(kw in s_lower for kw in ['deductible', 'coinsurance', 'covered', 'none', 'n/a', '%']):
             return s
-        # If it's a bare dollar amount like "$10" or "$40", add " Copay"
         if s.startswith('$') and 'copay' not in s_lower:
             return f"{s} Copay"
         return s
@@ -253,10 +246,8 @@ class ComparisonExcelGenerator(BaseExcelGenerator):
             return ''
         s = str(val).strip()
         s_lower = s.lower()
-        # Already has suffix
         if 'copay' in s_lower or 'coinsurance' in s_lower or 'covered' in s_lower:
             return s
-        # Handle 'Deductible then $X' → 'Deductible then $X Copay'
         if s_lower.startswith('deductible then'):
             remainder = s[len('Deductible then '):].strip()
             if remainder.startswith('$') and '%' not in remainder:
@@ -264,24 +255,48 @@ class ComparisonExcelGenerator(BaseExcelGenerator):
             elif '%' in remainder:
                 return f"Deductible then {remainder} Coinsurance"
             return s
-        # Bare dollar → Copay
         if s.startswith('$') and '%' not in s:
             return f"{s} Copay"
-        # Bare percentage → Coinsurance
         if '%' in s:
             return f"{s} Coinsurance"
         return s
 
     @staticmethod
+    def _build_rx_display(row, val_fn):
+        """
+        Build a single consolidated Rx display string from individual tier fields.
+        Uses rx_display if already populated by extraction; otherwise builds from tiers.
+        Format: "Generic: $X / Preferred: $X / Non-Preferred: $X"
+        """
+        # Use pre-built rx_display from extraction if available
+        rx_display = val_fn(row, 'rx_display')
+        if rx_display and str(rx_display).strip():
+            return str(rx_display).strip()
+
+        # Fall back to building from individual tier fields
+        generic = val_fn(row, 'rx_generic')
+        preferred = val_fn(row, 'rx_preferred_brand')
+        non_preferred = val_fn(row, 'rx_non_preferred_brand')
+
+        parts = []
+        if generic:
+            parts.append(f"Generic: {ComparisonExcelGenerator._fmt_rx_value(str(generic))}")
+        if preferred:
+            parts.append(f"Preferred: {ComparisonExcelGenerator._fmt_rx_value(str(preferred))}")
+        if non_preferred:
+            parts.append(f"Non-Preferred: {ComparisonExcelGenerator._fmt_rx_value(str(non_preferred))}")
+
+        return " / ".join(parts) if parts else ''
+
+    @staticmethod
     def _fmt_deductible(val):
-        """'None' → 'No Deductible'. Also catches 'None / None (...)' from preprocessor."""
+        """'None' → 'No Deductible'. Preserve allowance+deductible multi-line format."""
         if not val or val == '':
             return ''
         s = str(val).strip()
         s_lower = s.lower()
         if s_lower in ('none', 'n/a', 'na', '$0', '$0/$0', 'no deductible'):
             return 'No Deductible'
-        # Catch preprocessor output like "None / None (Embedded)"
         if s_lower.startswith('none / none'):
             return 'No Deductible'
         return s
@@ -318,7 +333,7 @@ class ComparisonExcelGenerator(BaseExcelGenerator):
         # Column widths
         ws.set_column(0, 0, 35)
         for i in range(n_plans):
-            ws.set_column(1 + i * 2, 2 + i * 2, 18)
+            ws.set_column(1 + i * 2, 2 + i * 2, 22)
         ws.freeze_panes(1, 1)
 
         # ── Row 0: plan name headers (merged per pair) ────────────────
@@ -336,10 +351,8 @@ class ComparisonExcelGenerator(BaseExcelGenerator):
         c_fam_row = self._EXCEL_ROWS['count_fam']
 
         # ── Data rows ─────────────────────────────────────────────────
-        # Fields that need copay formatting
         COPAY_FIELDS = {'pcp_copay', 'specialist_copay', 'inpatient_hospital',
                         'outpatient_facility', 'emergency_room', 'urgent_care'}
-        RX_FIELDS = {'rx_generic', 'rx_preferred_brand', 'rx_non_preferred_brand'}
 
         for key, label, row_type in self.COMPARISON_ROWS:
             xls_row = self._EXCEL_ROWS[key] - 1  # xlsxwriter 0-indexed
@@ -352,8 +365,6 @@ class ComparisonExcelGenerator(BaseExcelGenerator):
                     ws.write(xls_row, col_s + 1, 'RENEWAL', self.subheader_fmt)
 
             elif row_type in ('rate', 'rate_last'):
-                # Rates are NOT bolded — plain currency format
-                # rate_last (Family) gets a thick bottom border
                 if row_type == 'rate_last':
                     left_fmt = self.rate_last_fmt_left
                     center_fmt = self.rate_last_fmt_center
@@ -378,7 +389,6 @@ class ComparisonExcelGenerator(BaseExcelGenerator):
                         ws.write(xls_row, col_s + 1, ren_val, center_fmt)
 
             elif row_type == 'total':
-                # Monthly Premium Total — BOLD
                 ws.write(xls_row, 0, label, self.bold_currency_left_fmt)
                 for i in range(n_plans):
                     col_s   = 1 + i * 2
@@ -396,7 +406,6 @@ class ComparisonExcelGenerator(BaseExcelGenerator):
                     ws.write_formula(xls_row, col_s + 1, ren_formula,  self.bold_currency_fmt)
 
             elif row_type == 'diff':
-                # Monthly Premium Difference — BOLD
                 ws.write(xls_row, 0, label, self.bold_currency_left_fmt)
                 for i in range(n_plans):
                     col_s    = 1 + i * 2
@@ -407,7 +416,6 @@ class ComparisonExcelGenerator(BaseExcelGenerator):
                     ws.write_formula(xls_row, col_s, formula, self.bold_currency_fmt)
 
             elif row_type == 'pct':
-                # % Difference — BOLD
                 ws.write(xls_row, 0, label, self.bold_percent_left_fmt)
                 for i in range(n_plans):
                     col_s    = 1 + i * 2
@@ -426,22 +434,24 @@ class ComparisonExcelGenerator(BaseExcelGenerator):
                 ws.write(xls_row, 0, label, self.cell_fmt_left)
                 for i, (curr_row, ren_row) in enumerate(plan_pairs):
                     col_s    = 1 + i * 2
-                    curr_val = str(self._val(curr_row, key))
-                    ren_val  = str(self._val(ren_row, key))
 
-                    # Apply value formatting based on field type
-                    if key == 'deductible_display' or key == 'deductible_oon_display':
-                        curr_val = self._fmt_deductible(curr_val)
-                        ren_val = self._fmt_deductible(ren_val)
-                    elif key == 'coinsurance_in' or key == 'coinsurance_oon':
-                        curr_val = self._fmt_coinsurance(curr_val)
-                        ren_val = self._fmt_coinsurance(ren_val)
-                    elif key in COPAY_FIELDS:
-                        curr_val = self._fmt_copay(curr_val)
-                        ren_val = self._fmt_copay(ren_val)
-                    elif key in RX_FIELDS:
-                        curr_val = self._fmt_rx_value(curr_val)
-                        ren_val = self._fmt_rx_value(ren_val)
+                    # Build display values based on field type
+                    if key == 'rx_display':
+                        curr_val = self._build_rx_display(curr_row, self._val)
+                        ren_val  = self._build_rx_display(ren_row, self._val)
+                    else:
+                        curr_val = str(self._val(curr_row, key))
+                        ren_val  = str(self._val(ren_row, key))
+
+                        if key in ('deductible_display', 'deductible_oon_display'):
+                            curr_val = self._fmt_deductible(curr_val)
+                            ren_val  = self._fmt_deductible(ren_val)
+                        elif key in ('coinsurance_in', 'coinsurance_oon'):
+                            curr_val = self._fmt_coinsurance(curr_val)
+                            ren_val  = self._fmt_coinsurance(ren_val)
+                        elif key in COPAY_FIELDS:
+                            curr_val = self._fmt_copay(curr_val)
+                            ren_val  = self._fmt_copay(ren_val)
 
                     if curr_val == ren_val or not ren_val:
                         ws.merge_range(xls_row, col_s, xls_row, col_s + 1, curr_val, self.cell_fmt_center)
@@ -463,13 +473,12 @@ class ComparisonExcelGenerator(BaseExcelGenerator):
                         val = member_counts[i].get(mc_key, '')
                         if val == 0:
                             val = ''
-                    # Write to CURRENT column; RENEWAL total formula uses CURRENT counts
                     ws.merge_range(xls_row, col_s, xls_row, col_s + 1, '', self.cell_fmt_center)
                     if val != '':
                         ws.write_number(xls_row, col_s, val, self.cell_fmt_center)
 
         # ── Footer ────────────────────────────────────────────────────
-        last_data_xls = self._EXCEL_ROWS['count_fam'] - 1  # xlsxwriter 0-indexed
+        last_data_xls = self._EXCEL_ROWS['count_fam'] - 1
         last_col = n_plans * 2
         ws.merge_range(
             last_data_xls + 2, 0, last_data_xls + 2, last_col,
@@ -502,7 +511,7 @@ class ComparisonExcelGenerator(BaseExcelGenerator):
 
         ws.set_column(0, 0, 35)
         for i in range(n_plans):
-            ws.set_column(1 + i * 2, 2 + i * 2, 18)
+            ws.set_column(1 + i * 2, 2 + i * 2, 22)
         ws.freeze_panes(1, 1)
 
         # ── Row 0: plan name headers ───────────────────────────────────
@@ -522,7 +531,6 @@ class ComparisonExcelGenerator(BaseExcelGenerator):
         # ── Data rows ─────────────────────────────────────────────────
         COPAY_FIELDS = {'pcp_copay', 'specialist_copay', 'inpatient_hospital',
                         'outpatient_facility', 'emergency_room', 'urgent_care'}
-        RX_FIELDS = {'rx_generic', 'rx_preferred_brand', 'rx_non_preferred_brand'}
 
         for key, label, row_type in self.COMPARISON_ROWS:
             xls_row = self._EXCEL_ROWS[key] - 1  # xlsxwriter 0-indexed
@@ -533,7 +541,6 @@ class ComparisonExcelGenerator(BaseExcelGenerator):
                 ws.merge_range(xls_row, 1, xls_row, last_col, '', self.section_fmt_center)
 
             elif row_type in ('rate', 'rate_last'):
-                # Rates NOT bolded; rate_last gets thick bottom border
                 if row_type == 'rate_last':
                     left_fmt = self.rate_last_fmt_left
                     center_fmt = self.rate_last_fmt_center
@@ -552,7 +559,6 @@ class ComparisonExcelGenerator(BaseExcelGenerator):
                         ws.write(xls_row, col_s, val, center_fmt)
 
             elif row_type == 'total':
-                # BOLD
                 ws.write(xls_row, 0, label, self.bold_currency_left_fmt)
                 for i in range(n_plans):
                     col_s   = 1 + i * 2
@@ -565,7 +571,6 @@ class ComparisonExcelGenerator(BaseExcelGenerator):
                     ws.write_formula(xls_row, col_s, formula, self.bold_currency_fmt)
 
             elif row_type == 'diff':
-                # BOLD
                 ws.write(xls_row, 0, label, self.bold_currency_left_fmt)
                 for i in range(n_plans):
                     col_s   = 1 + i * 2
@@ -581,7 +586,6 @@ class ComparisonExcelGenerator(BaseExcelGenerator):
                     ws.write_formula(xls_row, col_s, formula, self.bold_currency_fmt)
 
             elif row_type == 'pct':
-                # BOLD
                 ws.write(xls_row, 0, label, self.bold_percent_left_fmt)
                 for i in range(n_plans):
                     col_s   = 1 + i * 2
@@ -605,17 +609,17 @@ class ComparisonExcelGenerator(BaseExcelGenerator):
                 ws.write(xls_row, 0, label, self.cell_fmt_left)
                 for i, plan_row in enumerate(opt_plans):
                     col_s = 1 + i * 2
-                    val   = str(self._val(plan_row, key))
 
-                    # Apply value formatting
-                    if key == 'deductible_display' or key == 'deductible_oon_display':
-                        val = self._fmt_deductible(val)
-                    elif key == 'coinsurance_in' or key == 'coinsurance_oon':
-                        val = self._fmt_coinsurance(val)
-                    elif key in COPAY_FIELDS:
-                        val = self._fmt_copay(val)
-                    elif key in RX_FIELDS:
-                        val = self._fmt_rx_value(val)
+                    if key == 'rx_display':
+                        val = self._build_rx_display(plan_row, self._val)
+                    else:
+                        val = str(self._val(plan_row, key))
+                        if key in ('deductible_display', 'deductible_oon_display'):
+                            val = self._fmt_deductible(val)
+                        elif key in ('coinsurance_in', 'coinsurance_oon'):
+                            val = self._fmt_coinsurance(val)
+                        elif key in COPAY_FIELDS:
+                            val = self._fmt_copay(val)
 
                     ws.merge_range(xls_row, col_s, xls_row, col_s + 1, val, self.cell_fmt_center)
 
@@ -629,8 +633,6 @@ class ComparisonExcelGenerator(BaseExcelGenerator):
                 for i in range(n_plans):
                     col_s = 1 + i * 2
                     val = ''
-                    # Opts tabs use the same member counts as Current_Renewal
-                    # matched by position (plan 0 = same counts as enrolled plan 0)
                     if member_counts and i < len(member_counts) and mc_key:
                         val = member_counts[i].get(mc_key, '')
                         if val == 0:

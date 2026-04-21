@@ -53,7 +53,7 @@ async def detect_quarters(file_id: str) -> list[str]:
     try:
         resp = await client.responses.parse(
             model="gpt-5-mini",
-            reasoning = {"effort": "low"},
+            reasoning = {"effort": "high"},
             instructions=(
                 "You are analyzing an insurance document. "
                 "Identify which quarters (Q1, Q2, Q3, Q4) have rate data in this document. "
@@ -95,7 +95,6 @@ async def detect_quarters(file_id: str) -> list[str]:
             file_id=file_id,
             error=str(e),
         )
-        # Fallback: assume all 4 quarters
         return ["Q1", "Q2", "Q3", "Q4"]
 
 
@@ -151,6 +150,37 @@ STRICT COMPLIANCE RULES:
     - Remove HIOS ID, Plan ID, or any parenthetical ID suffixes
     - If two plans have identical rates and benefits but slightly different names (e.g. one has an ID suffix), they are the SAME plan — extract only once
     - Keep metal tier (Platinum/Gold/Silver/Bronze), network type (POS/PPO/EPO), and plan variant identifiers (Classic, Plus, EX, Apex, HSAQ, Option 2, etc.)
+
+13. IHA ACTIVATE PLANS — BENEFIT ALLOWANCE (FIRST DOLLAR COVERAGE):
+    IHA "Activate" plans include a Benefit Allowance that applies BEFORE the deductible. This may appear as "First Dollar Coverage", "Benefit Allowance", or a dollar amount shown above the deductible in the benefit summary.
+    - Extract the allowance amounts into the fields: benefit_allowance_ee and benefit_allowance_fam.
+    - Example: If the summary shows "Allowance: $750 / $1,500" before the deductible, set benefit_allowance_ee="$750" and benefit_allowance_fam="$1,500".
+    - The deductible_display field should then be formatted as:
+      "Allowance: $750 / $1,500\\nDeductible: $1,500 / $3,000 (Embedded)"
+    - All benefit lines for Activate plans (coinsurance, copays, etc.) apply AFTER the allowance is exhausted, then the deductible applies. Extract them exactly as stated in the summary — do not assume they are incorrect.
+    - If no allowance is present, leave benefit_allowance_ee and benefit_allowance_fam empty.
+
+14. OUTPATIENT SURGICAL — ASC ONLY:
+    When extracting the Outpatient Surgical benefit (outpatient_facility field):
+    - If the plan lists BOTH a hospital outpatient cost AND an Ambulatory Surgery Center (ASC) cost separately, extract ONLY the ASC cost.
+    - ASC is also called "Ambulatory Surgical Center", "Ambulatory Surgery Center", or labeled "ASC" in the benefit summary.
+    - Example: If summary shows "Hospital: Deductible then $375 / ASC: Deductible then $325", set outpatient_facility = "Deductible then $325".
+    - Example: If summary shows "ASC Deductible then 25%; Hospital Deductible then 25%", set outpatient_facility = "Deductible then 25%".
+    - If only one outpatient surgical cost is listed (no ASC/Hospital split), use that single value as-is.
+
+15. PRESCRIPTION (Rx) — SINGLE LINE FORMAT:
+    Combine all Rx tier information into a single consolidated string for the rx_display field.
+    Format: "Generic: $X / Preferred: $X / Non-Preferred: $X"
+    Example: "Generic: $10 Copay / Preferred: $40 Copay / Non-Preferred: $100 Copay"
+    Also still populate the individual fields rx_generic, rx_preferred_brand, rx_non_preferred_brand separately.
+    For plans with deductible-first Rx: "Generic: Deductible then $10 / Preferred: Deductible then 25% / Non-Preferred: Deductible then 50%"
+
+16. MEDICARE PART D:
+    IHA plan summaries include a Medicare Part D / Creditable Coverage notice, typically on page 4 of the benefit summary.
+    - Extract the Medicare Part D creditable coverage status into the creditable_coverage field.
+    - If the summary states the plan IS creditable coverage for Medicare Part D, set creditable_coverage = "Creditable Coverage".
+    - If it states the plan is NOT creditable, set creditable_coverage = "Non-Creditable Coverage".
+    - If not stated or not found, set creditable_coverage = "Not stated".
 """
 
     try:
