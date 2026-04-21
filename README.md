@@ -248,6 +248,34 @@ The `NEXT_PUBLIC_API_URL` environment variable, currently set to `http://localho
 NEXT_PUBLIC_API_URL=https://your-deployed-backend-url.com
 ```
 
+## Downloading Project Files from EC2
+
+To download the project from your EC2 instance to your local machine:
+
+### 1. SSH into the EC2 instance and create the zip
+
+```sh
+ssh -i YOUR-KEY.pem ubuntu@YOUR-EC2-PUBLIC-IP
+cd /home/ubuntu/envision-benefits-marketing
+bash package-for-download.sh
+```
+
+This creates `/home/ubuntu/envision-benefits-marketing.zip`, excluding `.git`, `node_modules`, build artifacts, and `.env`.
+
+### 2. Download the zip via SCP (run on your local machine)
+
+**Windows (PowerShell / Command Prompt):**
+```
+scp -i YOUR-KEY.pem ubuntu@YOUR-EC2-PUBLIC-IP:/home/ubuntu/envision-benefits-marketing.zip C:\Users\kristin\Desktop\
+```
+
+**macOS / Linux:**
+```sh
+scp -i YOUR-KEY.pem ubuntu@YOUR-EC2-PUBLIC-IP:/home/ubuntu/envision-benefits-marketing.zip ~/Desktop/
+```
+
+Replace `YOUR-KEY.pem` with the path to your EC2 key pair file and `YOUR-EC2-PUBLIC-IP` with the instance's public IP address.
+
 ## Useful Links
 
 - [Docker Documentation](https://docs.docker.com/)
