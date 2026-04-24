@@ -129,14 +129,15 @@ export default function ExtractionPage() {
 
           {/* Left: SOLA logo */}
           <div className="flex items-center gap-3">
-            <Image
-              src="/sola-logo.png"
-              alt="EnvisionSOLA System"
-              width={120}
-              height={48}
-              className="h-10 w-auto object-contain"
-              style={{ filter: "brightness(0) invert(1)" }}
-            />
+            <div className="bg-white rounded-lg px-2 py-1">
+              <Image
+                src="/sola-logo.png"
+                alt="EnvisionSOLA System"
+                width={110}
+                height={44}
+                className="h-9 w-auto object-contain"
+              />
+            </div>
             <div className="h-6 w-px" style={{ background: "rgba(255,255,255,0.2)" }} />
             <span
               className="text-xs font-semibold tracking-widest uppercase hidden sm:block"
