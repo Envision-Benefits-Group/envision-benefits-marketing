@@ -400,7 +400,6 @@ export function UploadTab({ onIngestionComplete }: UploadTabProps) {
 function BenefitSummaryUpload() {
   const [files, setFiles] = useState<File[]>([]);
   const [year, setYear] = useState<string>("");
-  const [quarter, setQuarter] = useState<string>("");
   const [status, setStatus] = useState<"IDLE" | "PROCESSING" | "SUCCESS" | "ERROR">("IDLE");
   const [result, setResult] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
@@ -416,7 +415,7 @@ function BenefitSummaryUpload() {
     if (files.length === 0) return;
     setStatus("PROCESSING"); setError(null);
     try {
-      const { data } = await extractionApi.ingestBenefits(files, year || undefined, quarter || undefined);
+      const { data } = await extractionApi.ingestBenefits(files, year || undefined);
       setResult(data); setStatus("SUCCESS");
     } catch (err: any) {
       setError(err.response?.data?.detail || err.message || "An error occurred.");
@@ -435,7 +434,7 @@ function BenefitSummaryUpload() {
         </div>
         <div>
           <p className="text-sm font-semibold text-gray-800">Upload Benefit Summaries</p>
-          <p className="text-xs text-gray-500">Updates benefit details (deductibles, copays, Rx, Medicare Part D) on existing plans</p>
+          <p className="text-xs text-gray-500">Updates benefit details (deductibles, copays, Rx, Medicare Part D) across all quarters for the selected year</p>
         </div>
       </div>
 
@@ -470,23 +469,14 @@ function BenefitSummaryUpload() {
         </div>
       )}
 
-      <div className="flex items-center gap-3 flex-wrap">
+      <div className="flex items-center gap-3">
         <Select value={year} onValueChange={setYear} disabled={status === "PROCESSING"}>
           <SelectTrigger className="w-32"><SelectValue placeholder="Year" /></SelectTrigger>
           <SelectContent>
             {years.map(y => <SelectItem key={y} value={y}>{y}</SelectItem>)}
           </SelectContent>
         </Select>
-        <Select value={quarter} onValueChange={setQuarter} disabled={status === "PROCESSING"}>
-          <SelectTrigger className="w-32"><SelectValue placeholder="Quarter" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="Q1">Q1</SelectItem>
-            <SelectItem value="Q2">Q2</SelectItem>
-            <SelectItem value="Q3">Q3</SelectItem>
-            <SelectItem value="Q4">Q4</SelectItem>
-          </SelectContent>
-        </Select>
-        <span className="text-xs text-gray-400">Select the year and quarter these summaries apply to</span>
+        <span className="text-xs text-gray-400">Benefits apply to all quarters for this year</span>
       </div>
 
       {error && (

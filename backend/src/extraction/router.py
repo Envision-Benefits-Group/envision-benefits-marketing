@@ -204,9 +204,129 @@ async def ingest_pdfs(
 async def ingest_benefit_summaries(
         files: Annotated[List[UploadFile], File(description="Upload IHA Benefit Summary PDFs")],
         year: Optional[str] = Form(None, description="Plan year (e.g. 2025 or 2026)"),
-        quarter: Optional[str] = Form(None, description="Quarter override (Q1-Q4)"),
         api_key: str = Security(get_api_key),
 ):
+    """
+    Ingest benefit summary PDFs and update benefit fields on existing plan records.
+    Matches plans by carrier + plan_name + year, updates benefit fields across ALL quarters.
+    """
+    if not files:
+        raise HTTPException(status_code=400, detail="No files provided.")
+
+    year_int = int(year) if year else None
+
+    results = []
+
+    for file in files:
+        filename = file.filename
+        log = logger.bind(filename=filename)
+        content = await file.read()
+
+        try:
+            file_id = await upload_pdf(content)
+        except Exception as e:
+            results.append({"file": filename, "status": "error", "detail": f"Upload failed: {str(e)}"})
+            continue
+
+        try:
+            benefit_data = await extract_benefits_from_pdf(file_id)
+        except Exception as e:
+            results.append({"file": filename, "status": "error", "detail": f"Extraction failed: {str(e)}"})
+            continue
+
+        if not benefit_data:
+            results.append({"file": filename, "status": "no_data_found"})
+            continue
+
+        carrier = benefit_data.get("carrier")
+        plan_name = benefit_data.get("plan_name")
+        extracted_year = year_int or benefit_data.get("year")
+
+        # Build benefit allowance deductible display if present
+        allowance_ee = benefit_data.get("benefit_allowance_ee", "")
+        allowance_fam = benefit_data.get("benefit_allowance_fam", "")
+        ded_ee = benefit_data.get("deductible_in_ee", "")
+        ded_fam = benefit_data.get("deductible_in_fam", "")
+        ded_type = benefit_data.get("in_network_deductible_type", "E")
+        type_label = "Embedded" if ded_type == "E" else "True Family"
+
+        if allowance_ee and allowance_fam:
+            benefit_data["deductible_in_ee"] = f"Allowance: {allowance_ee} / {allowance_fam}\nDeductible: {ded_ee} / {ded_fam} ({type_label})"
+            benefit_data["deductible_in_fam"] = benefit_data["deductible_in_ee"]
+
+        # Build rx_display consolidated field
+        rx_g = benefit_data.get("rx_generic", "")
+        rx_p = benefit_data.get("rx_preferred_brand", "")
+        rx_np = benefit_data.get("rx_non_preferred_brand", "")
+        rx_parts = []
+        if rx_g: rx_parts.append(f"Generic: {rx_g}")
+        if rx_p: rx_parts.append(f"Preferred: {rx_p}")
+        if rx_np: rx_parts.append(f"Non-Preferred: {rx_np}")
+        benefit_data["rx_display"] = " / ".join(rx_parts)
+
+        # Find matching plans in DB across ALL quarters and update benefit fields
+        from difflib import SequenceMatcher
+        from src.plans.models import Plan, MedicalPlanDetails
+        from sqlalchemy import select
+        from sqlalchemy.orm import selectinload
+
+        BENEFIT_FIELDS = [
+            "wellness_benefit", "deductible_in_ee", "deductible_in_fam",
+            "in_network_deductible_type", "coinsurance_in",
+            "oop_max_in_ee", "oop_max_in_fam", "in_network_oop_type",
+            "pcp_copay", "specialist_copay", "inpatient_hospital", "outpatient_facility",
+            "emergency_room", "urgent_care",
+            "deductible_oon_ee", "deductible_oon_fam", "out_network_deductible_type",
+            "coinsurance_oon", "oop_max_oon_ee", "oop_max_oon_fam", "out_network_oop_type",
+            "rx_generic", "rx_preferred_brand", "rx_non_preferred_brand",
+            "hsa_qualified", "creditable_coverage", "dependent_coverage",
+        ]
+
+        updated_count = 0
+        async with AsyncSessionLocal() as db:
+            # Find all plans for this carrier + year across ALL quarters
+            stmt = (
+                select(Plan)
+                .options(selectinload(Plan.medical_details))
+                .where(Plan.carrier == carrier, Plan.year == extracted_year)
+            )
+            result = await db.execute(stmt)
+            candidates = result.scalars().all()
+
+            incoming_name = plan_name.strip().lower()
+            for candidate in candidates:
+                candidate_name = candidate.plan_name.strip().lower()
+                ratio = SequenceMatcher(None, candidate_name, incoming_name).ratio()
+                if ratio >= 0.75:
+                    log.info("Updating benefits for plan", plan_name=candidate.plan_name, quarter=candidate.quarter, ratio=round(ratio, 3))
+                    if candidate.medical_details:
+                        for field in BENEFIT_FIELDS:
+                            if field in benefit_data and benefit_data[field]:
+                                setattr(candidate.medical_details, field, benefit_data[field])
+                    else:
+                        details = MedicalPlanDetails(plan_id=candidate.plan_id)
+                        for field in BENEFIT_FIELDS:
+                            if field in benefit_data and benefit_data[field]:
+                                setattr(details, field, benefit_data[field])
+                        db.add(details)
+                    updated_count += 1
+
+            await db.commit()
+
+        results.append({
+            "file": filename,
+            "status": "success" if updated_count > 0 else "no_match",
+            "carrier": carrier,
+            "plan_name": plan_name,
+            "year": extracted_year,
+            "plans_updated": updated_count,
+        })
+        log.info("Benefit ingest complete", carrier=carrier, plan_name=plan_name, plans_updated=updated_count)
+
+    return {
+        "total_files": len(files),
+        "files": results,
+    }
     """
     Ingest benefit summary PDFs and update benefit fields on existing plan records.
     Matches plans by carrier + plan_name + year + quarter, updates only benefit fields.
