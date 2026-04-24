@@ -411,12 +411,23 @@ function BenefitSummaryUpload() {
     if (valid.length) { setFiles(prev => [...prev, ...valid]); setStatus("IDLE"); setResult(null); }
   };
 
+  const [benefitProgress, setBenefitProgress] = useState(0);
+
   const handleProcess = async () => {
-    if (files.length === 0) return;
-    setStatus("PROCESSING"); setError(null);
+    if (files.length === 0 || !year) return;
+    setStatus("PROCESSING"); setError(null); setResult(null); setBenefitProgress(0);
+
+    const allResults: any[] = [];
+
     try {
-      const { data } = await extractionApi.ingestBenefits(files, year || undefined);
-      setResult(data); setStatus("SUCCESS");
+      // Process one file at a time to avoid proxy timeouts on large batches
+      for (let i = 0; i < files.length; i++) {
+        const { data } = await extractionApi.ingestBenefits([files[i]], year);
+        if (data.files) allResults.push(...data.files);
+        setBenefitProgress(Math.round(((i + 1) / files.length) * 100));
+      }
+      setResult({ total_files: files.length, files: allResults });
+      setStatus("SUCCESS");
     } catch (err: any) {
       setError(err.response?.data?.detail || err.message || "An error occurred.");
       setStatus("ERROR");
@@ -483,13 +494,29 @@ function BenefitSummaryUpload() {
         </span>
       </div>
 
+      {status === "PROCESSING" && (
+        <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 space-y-2">
+          <div className="flex items-center justify-between text-xs text-amber-700">
+            <span className="flex items-center gap-2">
+              <Loader2 className="w-3 h-3 animate-spin" />
+              Processing benefit summaries...
+            </span>
+            <span className="font-medium">{benefitProgress}%</span>
+          </div>
+          <div className="w-full bg-amber-100 rounded-full h-1.5">
+            <div className="bg-amber-500 h-1.5 rounded-full transition-all duration-300" style={{ width: `${benefitProgress}%` }} />
+          </div>
+          <p className="text-xs text-amber-600 text-center">
+            Do not close this tab — processing {files.length} file{files.length !== 1 ? "s" : ""} one at a time
+          </p>
+        </div>
+      )}
+
       {error && (
         <div className="bg-red-50 border border-red-200 text-red-600 px-3 py-2 rounded-lg flex items-center gap-2 text-sm">
           <AlertCircle className="w-4 h-4 shrink-0" />{error}
         </div>
       )}
-
-      {status === "SUCCESS" && result && (
         <div className="bg-amber-50 border border-amber-200 text-amber-800 px-4 py-3 rounded-lg">
           <div className="flex items-center gap-2 mb-2">
             <CheckCircle2 className="w-4 h-4" />
