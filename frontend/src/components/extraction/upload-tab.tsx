@@ -517,6 +517,8 @@ function BenefitSummaryUpload() {
           <AlertCircle className="w-4 h-4 shrink-0" />{error}
         </div>
       )}
+
+      {status === "SUCCESS" && result && (
         <div className="bg-amber-50 border border-amber-200 text-amber-800 px-4 py-3 rounded-lg">
           <div className="flex items-center gap-2 mb-2">
             <CheckCircle2 className="w-4 h-4" />
@@ -533,6 +535,7 @@ function BenefitSummaryUpload() {
             ))}
           </div>
         </div>
+      )}
       )}
 
       <div className="flex justify-between">
