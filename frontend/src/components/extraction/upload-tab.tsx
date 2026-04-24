@@ -471,12 +471,16 @@ function BenefitSummaryUpload() {
 
       <div className="flex items-center gap-3">
         <Select value={year} onValueChange={setYear} disabled={status === "PROCESSING"}>
-          <SelectTrigger className="w-32"><SelectValue placeholder="Year" /></SelectTrigger>
+          <SelectTrigger className={`w-36 ${!year && files.length > 0 ? "border-amber-400 ring-1 ring-amber-300" : ""}`}>
+            <SelectValue placeholder="Select year *" />
+          </SelectTrigger>
           <SelectContent>
             {years.map(y => <SelectItem key={y} value={y}>{y}</SelectItem>)}
           </SelectContent>
         </Select>
-        <span className="text-xs text-gray-400">Benefits apply to all quarters for this year</span>
+        <span className="text-xs text-gray-400">
+          {year ? "Benefits apply to all quarters for this year" : <span className="text-amber-600 font-medium">Year is required</span>}
+        </span>
       </div>
 
       {error && (
@@ -508,9 +512,14 @@ function BenefitSummaryUpload() {
         <Button variant="ghost" size="sm" onClick={() => { setFiles([]); setStatus("IDLE"); setResult(null); setError(null); }} disabled={status === "PROCESSING"}>
           Reset
         </Button>
-        <Button onClick={handleProcess} disabled={files.length === 0 || status === "PROCESSING"} size="sm" className="gap-2 bg-amber-600 hover:bg-amber-700">
-          {status === "PROCESSING" ? <><Loader2 className="w-3 h-3 animate-spin" />Processing...</> : <><ClipboardList className="w-3 h-3" />Update Benefits</>}
-        </Button>
+        <div className="flex items-center gap-2">
+          {!year && files.length > 0 && (
+            <span className="text-xs text-amber-600 font-medium">Select a year to continue</span>
+          )}
+          <Button onClick={handleProcess} disabled={files.length === 0 || !year || status === "PROCESSING"} size="sm" className="gap-2 bg-amber-600 hover:bg-amber-700">
+            {status === "PROCESSING" ? <><Loader2 className="w-3 h-3 animate-spin" />Processing...</> : <><ClipboardList className="w-3 h-3" />Update Benefits</>}
+          </Button>
+        </div>
       </div>
     </div>
   );
