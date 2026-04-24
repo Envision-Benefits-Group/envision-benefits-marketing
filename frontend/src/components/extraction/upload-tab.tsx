@@ -536,7 +536,6 @@ function BenefitSummaryUpload() {
           </div>
         </div>
       )}
-      )}
 
       <div className="flex justify-between">
         <Button variant="ghost" size="sm" onClick={() => { setFiles([]); setStatus("IDLE"); setResult(null); setError(null); }} disabled={status === "PROCESSING"}>
