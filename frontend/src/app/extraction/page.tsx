@@ -130,7 +130,7 @@ export default function ExtractionPage() {
           {/* Left: SOLA logo */}
           <div className="flex items-center gap-3">
             <Image
-              src="/sola-logo.png"
+              src="/sola-logo.svg"
               alt="EnvisionSOLA System"
               width={120}
               height={48}
