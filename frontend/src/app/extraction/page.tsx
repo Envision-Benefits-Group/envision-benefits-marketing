@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Upload, TableProperties, ArrowLeftRight } from "lucide-react";
 import Image from "next/image";
 import { UploadTab } from "@/components/extraction/upload-tab";
 import { PlansTableTab } from "@/components/extraction/plans-table-tab";
@@ -10,30 +9,35 @@ import { ComparisonTab } from "@/components/extraction/comparison-tab";
 import { PlanEditDialog } from "@/components/plans/plan-edit-dialog";
 import { plansApi } from "@/lib/api";
 import type { BrowseFilters, Plan } from "@/types/plans";
+import {
+  UploadCloud,
+  Database,
+  BarChart3,
+  ChevronRight,
+  Activity,
+} from "lucide-react";
 
 type TabId = "upload" | "plans" | "comparison";
 
-const TAB_META: Record<TabId, { title: string; description: string }> = {
-  upload: {
-    title: "Upload Files",
-    description: "Upload PDFs to extract and ingest plan data automatically",
+const TABS: { id: TabId; label: string; description: string; icon: React.ElementType }[] = [
+  {
+    id: "upload",
+    label: "Data Input",
+    description: "Upload rate PDFs & benefit summaries",
+    icon: UploadCloud,
   },
-  plans: {
-    title: "Edit Data",
-    description:
-      "Browse, filter, and edit plans. Download as Master Template.",
+  {
+    id: "plans",
+    label: "Plan Data",
+    description: "Browse, filter & edit extracted plans",
+    icon: Database,
   },
-  comparison: {
-    title: "Comparison",
-    description:
-      "Select current plans, auto-pair renewals, and generate comparison.",
+  {
+    id: "comparison",
+    label: "Generate Output",
+    description: "Build & download comparison grids",
+    icon: BarChart3,
   },
-};
-
-const TABS = [
-  { id: "upload" as const, label: "Upload Files", icon: Upload },
-  { id: "plans" as const, label: "Edit Data", icon: TableProperties },
-  { id: "comparison" as const, label: "Comparison", icon: ArrowLeftRight },
 ];
 
 export default function ExtractionPage() {
@@ -59,11 +63,8 @@ export default function ExtractionPage() {
     }
   }, [filters]);
 
-  useEffect(() => {
-    fetchPlans();
-  }, [fetchPlans]);
+  useEffect(() => { fetchPlans(); }, [fetchPlans]);
 
-  // Auto-select the latest year on first load
   useEffect(() => {
     if (!didAutoYear.current && plans.length > 0) {
       didAutoYear.current = true;
@@ -72,10 +73,7 @@ export default function ExtractionPage() {
     }
   }, [plans]);
 
-  const handleEditSave = async (
-    planId: string,
-    data: Record<string, unknown>
-  ) => {
+  const handleEditSave = async (planId: string, data: Record<string, unknown>) => {
     setIsSaving(true);
     try {
       await plansApi.update(planId, data as Partial<Plan>);
@@ -97,10 +95,7 @@ export default function ExtractionPage() {
     }
     setIsDownloading(true);
     try {
-      const { data } = await plansApi.downloadMasterTemplate(
-        filters.year,
-        filters.quarter
-      );
+      const { data } = await plansApi.downloadMasterTemplate(filters.year, filters.quarter);
       const url = window.URL.createObjectURL(new Blob([data]));
       const a = document.createElement("a");
       a.href = url;
@@ -116,76 +111,155 @@ export default function ExtractionPage() {
     }
   };
 
+  const activeTabMeta = TABS.find((t) => t.id === activeTab)!;
+  const ActiveIcon = activeTabMeta.icon;
+
   return (
-    <div className="min-h-screen bg-gray-50">
-        <header className="bg-white border-b border-gray-200 sticky top-0 z-40 shadow-sm h-16 flex items-center px-4">
-          <Image
-            src="/logo.png"
-            alt="Envision HR Platform"
-            width={50}
-            height={50}
-            className="h-12 w-auto rounded-lg"
-          />
-        </header>
+    <div className="min-h-screen" style={{ background: "#f0f2f5" }}>
 
-        <div className="flex" style={{ minHeight: "calc(100vh - 64px)" }}>
-          {/* Left Sidebar */}
-          <aside className="w-56 flex-shrink-0 bg-white border-r border-gray-200">
-            <nav className="p-3 space-y-1 sticky top-16">
-              {TABS.map(({ id, label, icon: Icon }) => (
+      {/* ── Header ──────────────────────────────────────────────────── */}
+      <header
+        className="sticky top-0 z-50"
+        style={{
+          background: "linear-gradient(135deg, #0d2240 0%, #1a3a6b 100%)",
+          boxShadow: "0 2px 20px rgba(0,0,0,0.25)",
+        }}
+      >
+        <div className="flex items-center justify-between px-6 h-16">
+
+          {/* Left: SOLA logo */}
+          <div className="flex items-center gap-3">
+            <Image
+              src="/sola-logo.png"
+              alt="EnvisionSOLA System"
+              width={120}
+              height={48}
+              className="h-10 w-auto object-contain"
+              style={{ filter: "brightness(0) invert(1)" }}
+            />
+            <div className="h-6 w-px" style={{ background: "rgba(255,255,255,0.2)" }} />
+            <span
+              className="text-xs font-semibold tracking-widest uppercase hidden sm:block"
+              style={{ color: "#c9a84c", letterSpacing: "0.15em" }}
+            >
+              Benefits Marketing Platform
+            </span>
+          </div>
+
+          {/* Center: Tab navigation */}
+          <nav className="flex items-center gap-1">
+            {TABS.map((tab) => {
+              const Icon = tab.icon;
+              const isActive = activeTab === tab.id;
+              return (
                 <button
-                  key={id}
-                  onClick={() => setActiveTab(id)}
-                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors text-left ${
-                    activeTab === id
-                      ? "bg-primary/10 text-primary border-l-2 border-primary pl-[10px]"
-                      : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
-                  }`}
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  className="relative flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200"
+                  style={{
+                    background: isActive ? "rgba(201,168,76,0.15)" : "transparent",
+                    color: isActive ? "#c9a84c" : "rgba(255,255,255,0.65)",
+                    border: isActive ? "1px solid rgba(201,168,76,0.3)" : "1px solid transparent",
+                  }}
                 >
-                  <Icon className="h-4 w-4 shrink-0" />
-                  {label}
+                  <Icon className="w-4 h-4" />
+                  <span className="hidden sm:inline">{tab.label}</span>
+                  {isActive && (
+                    <span
+                      className="absolute bottom-0 left-0 right-0 h-0.5 rounded-full"
+                      style={{ background: "#c9a84c" }}
+                    />
+                  )}
                 </button>
-              ))}
-            </nav>
-          </aside>
+              );
+            })}
+          </nav>
 
-          {/* Main Content */}
-          <main className="flex-1 p-6 overflow-auto">
-            <div className="max-w-[1400px] mx-auto">
-              <div className="mb-6">
-                <h1 className="text-2xl font-bold text-gray-900">
-                  {TAB_META[activeTab].title}
-                </h1>
-                <p className="text-sm text-gray-500 mt-1">
-                  {TAB_META[activeTab].description}
-                </p>
-              </div>
-
-              {activeTab === "upload" && (
-                <UploadTab onIngestionComplete={fetchPlans} />
-              )}
-              {activeTab === "plans" && (
-                <PlansTableTab
-                  plans={plans}
-                  loading={loading}
-                  filters={filters}
-                  onFiltersChange={setFilters}
-                  onEdit={setEditingPlan}
-                  onDownloadMasterTemplate={handleDownloadMasterTemplate}
-                  isDownloading={isDownloading}
-                />
-              )}
-              {activeTab === "comparison" && <ComparisonTab />}
-            </div>
-          </main>
+          {/* Right: EB logo */}
+          <div className="flex items-center">
+            <Image
+              src="/eb-logo.svg"
+              alt="Envision Benefits Group"
+              width={160}
+              height={40}
+              className="h-8 w-auto object-contain"
+              style={{ filter: "brightness(0) invert(1)" }}
+            />
+          </div>
         </div>
+      </header>
+
+      {/* ── Page Title Bar ───────────────────────────────────────────── */}
+      <div
+        className="px-8 py-4"
+        style={{ background: "white", borderBottom: "1px solid #e2e6ea" }}
+      >
+        <div className="max-w-[1400px] mx-auto flex items-center gap-3">
+          <div
+            className="flex items-center justify-center w-9 h-9 rounded-lg flex-shrink-0"
+            style={{ background: "#0d2240" }}
+          >
+            <ActiveIcon className="w-5 h-5" style={{ color: "#c9a84c" }} />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-medium" style={{ color: "#8a95a0" }}>
+                Marketing Grid
+              </span>
+              <ChevronRight className="w-3 h-3" style={{ color: "#c0c8d0" }} />
+              <span className="text-xs font-semibold" style={{ color: "#0d2240" }}>
+                {activeTabMeta.label}
+              </span>
+            </div>
+            <h1 className="text-xl font-bold mt-0.5" style={{ color: "#0d2240" }}>
+              {activeTabMeta.label}
+            </h1>
+            <p className="text-xs mt-0.5" style={{ color: "#8a95a0" }}>
+              {activeTabMeta.description}
+            </p>
+          </div>
+          <div className="ml-auto flex items-center gap-2 px-3 py-1.5 rounded-lg" style={{ background: "#f0f2f5" }}>
+            <Activity className="w-3.5 h-3.5" style={{ color: "#4caf50" }} />
+            <span className="text-xs font-medium" style={{ color: "#6b7a8a" }}>
+              {plans.length} plan{plans.length !== 1 ? "s" : ""} in database
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Main Content ─────────────────────────────────────────────── */}
+      <main className="px-8 py-6">
+        <div className="max-w-[1400px] mx-auto">
+          {activeTab === "upload" && (
+            <UploadTab onIngestionComplete={fetchPlans} />
+          )}
+          {activeTab === "plans" && (
+            <PlansTableTab
+              plans={plans}
+              loading={loading}
+              filters={filters}
+              onFiltersChange={setFilters}
+              onEdit={setEditingPlan}
+              onDownloadMasterTemplate={handleDownloadMasterTemplate}
+              isDownloading={isDownloading}
+            />
+          )}
+          {activeTab === "comparison" && <ComparisonTab />}
+        </div>
+      </main>
+
+      {/* ── Footer ───────────────────────────────────────────────────── */}
+      <footer
+        className="mt-8 px-8 py-4 text-center text-xs"
+        style={{ color: "#9aa3ad", borderTop: "1px solid #e2e6ea", background: "white" }}
+      >
+        © {new Date().getFullYear()} Envision Benefits Group · EnvisionSOLA Benefits Marketing Platform
+      </footer>
 
       <PlanEditDialog
         plan={editingPlan}
         open={!!editingPlan}
-        onOpenChange={(open) => {
-          if (!open) setEditingPlan(null);
-        }}
+        onOpenChange={(open) => { if (!open) setEditingPlan(null); }}
         onSave={handleEditSave}
         isSaving={isSaving}
       />
