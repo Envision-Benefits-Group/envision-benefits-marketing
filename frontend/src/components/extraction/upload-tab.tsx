@@ -451,7 +451,7 @@ function BenefitSummaryUpload() {
         <div className="flex flex-col items-center justify-center py-8 gap-2 text-center px-6">
           <ClipboardList className={`w-6 h-6 ${files.length > 0 ? "text-amber-500" : "text-gray-300"}`} />
           <p className="text-sm font-medium text-gray-600">
-            {files.length > 0 ? `${files.length} benefit summary file${files.length > 1 ? "s" : ""} selected` : "Drop IHA benefit summary PDFs here"}
+            {files.length > 0 ? `${files.length} benefit summary file${files.length > 1 ? "s" : ""} selected` : "Drop benefit summary PDFs here"}
           </p>
           {files.length === 0 && <p className="text-xs text-gray-400">or click to browse</p>}
         </div>
