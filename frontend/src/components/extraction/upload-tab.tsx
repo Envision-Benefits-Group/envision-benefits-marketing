@@ -18,6 +18,7 @@ import {
   FileText,
   Upload,
   Loader2,
+  ClipboardList,
   X,
   Brain,
   DatabaseZap,
@@ -389,6 +390,138 @@ export function UploadTab({ onIngestionComplete }: UploadTabProps) {
           ))}
         </div>
       )}
+
+      {/* ── Benefit Summary Upload Section ────────────────────────── */}
+      <BenefitSummaryUpload />
+    </div>
+  );
+}
+
+function BenefitSummaryUpload() {
+  const [files, setFiles] = useState<File[]>([]);
+  const [year, setYear] = useState<string>("");
+  const [quarter, setQuarter] = useState<string>("");
+  const [status, setStatus] = useState<"IDLE" | "PROCESSING" | "SUCCESS" | "ERROR">("IDLE");
+  const [result, setResult] = useState<any>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const addFiles = (incoming: FileList | File[]) => {
+    const valid = Array.from(incoming).filter(f => f.name.toLowerCase().endsWith(".pdf"));
+    if (valid.length) { setFiles(prev => [...prev, ...valid]); setStatus("IDLE"); setResult(null); }
+  };
+
+  const handleProcess = async () => {
+    if (files.length === 0) return;
+    setStatus("PROCESSING"); setError(null);
+    try {
+      const { data } = await extractionApi.ingestBenefits(files, year || undefined, quarter || undefined);
+      setResult(data); setStatus("SUCCESS");
+    } catch (err: any) {
+      setError(err.response?.data?.detail || err.message || "An error occurred.");
+      setStatus("ERROR");
+    }
+  };
+
+  const currentYear = new Date().getFullYear();
+  const years = [String(currentYear - 1), String(currentYear), String(currentYear + 1)];
+
+  return (
+    <div className="mt-8 border-t border-gray-200 pt-8 space-y-4">
+      <div className="flex items-center gap-2 mb-2">
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-1.5">
+          <ClipboardList className="w-4 h-4 text-amber-600" />
+        </div>
+        <div>
+          <p className="text-sm font-semibold text-gray-800">Upload Benefit Summaries</p>
+          <p className="text-xs text-gray-500">Updates benefit details (deductibles, copays, Rx, Medicare Part D) on existing plans</p>
+        </div>
+      </div>
+
+      <div
+        onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+        onDragLeave={(e) => { e.preventDefault(); setIsDragging(false); }}
+        onDrop={(e) => { e.preventDefault(); setIsDragging(false); if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files); }}
+        onClick={() => status !== "PROCESSING" && fileInputRef.current?.click()}
+        className={`relative border-2 border-dashed rounded-xl cursor-pointer transition-all
+          ${isDragging ? "border-amber-400 bg-amber-50/40" : files.length > 0 ? "border-amber-300 bg-amber-50/20" : "border-gray-200 bg-gray-50/40 hover:border-gray-300"}`}
+        style={{ minHeight: 120 }}
+      >
+        <input ref={fileInputRef} type="file" accept=".pdf" multiple className="hidden" onChange={(e) => { if (e.target.files) addFiles(e.target.files); }} />
+        <div className="flex flex-col items-center justify-center py-8 gap-2 text-center px-6">
+          <ClipboardList className={`w-6 h-6 ${files.length > 0 ? "text-amber-500" : "text-gray-300"}`} />
+          <p className="text-sm font-medium text-gray-600">
+            {files.length > 0 ? `${files.length} benefit summary file${files.length > 1 ? "s" : ""} selected` : "Drop IHA benefit summary PDFs here"}
+          </p>
+          {files.length === 0 && <p className="text-xs text-gray-400">or click to browse</p>}
+        </div>
+      </div>
+
+      {files.length > 0 && (
+        <div className="space-y-1 max-h-32 overflow-y-auto">
+          {files.map((f, i) => (
+            <div key={i} className="flex items-center gap-2 text-xs text-gray-600 bg-white border border-gray-100 rounded-lg px-3 py-1.5">
+              <FileText className="w-3 h-3 text-amber-400 shrink-0" />
+              <span className="truncate">{f.name}</span>
+              <button onClick={(e) => { e.stopPropagation(); setFiles(prev => prev.filter((_, j) => j !== i)); }} className="ml-auto text-gray-300 hover:text-gray-500">✕</button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="flex items-center gap-3 flex-wrap">
+        <Select value={year} onValueChange={setYear} disabled={status === "PROCESSING"}>
+          <SelectTrigger className="w-32"><SelectValue placeholder="Year" /></SelectTrigger>
+          <SelectContent>
+            {years.map(y => <SelectItem key={y} value={y}>{y}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Select value={quarter} onValueChange={setQuarter} disabled={status === "PROCESSING"}>
+          <SelectTrigger className="w-32"><SelectValue placeholder="Quarter" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="Q1">Q1</SelectItem>
+            <SelectItem value="Q2">Q2</SelectItem>
+            <SelectItem value="Q3">Q3</SelectItem>
+            <SelectItem value="Q4">Q4</SelectItem>
+          </SelectContent>
+        </Select>
+        <span className="text-xs text-gray-400">Select the year and quarter these summaries apply to</span>
+      </div>
+
+      {error && (
+        <div className="bg-red-50 border border-red-200 text-red-600 px-3 py-2 rounded-lg flex items-center gap-2 text-sm">
+          <AlertCircle className="w-4 h-4 shrink-0" />{error}
+        </div>
+      )}
+
+      {status === "SUCCESS" && result && (
+        <div className="bg-amber-50 border border-amber-200 text-amber-800 px-4 py-3 rounded-lg">
+          <div className="flex items-center gap-2 mb-2">
+            <CheckCircle2 className="w-4 h-4" />
+            <p className="font-semibold text-sm">Benefit summaries processed</p>
+          </div>
+          <div className="space-y-1">
+            {result.files?.map((f: any, i: number) => (
+              <div key={i} className="flex items-center justify-between text-xs">
+                <span className="truncate max-w-xs">{f.file}</span>
+                <Badge variant={f.status === "success" ? "default" : "destructive"} className="ml-2 shrink-0">
+                  {f.status === "success" ? `${f.plans_updated} plan${f.plans_updated !== 1 ? "s" : ""} updated` : f.status}
+                </Badge>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="flex justify-between">
+        <Button variant="ghost" size="sm" onClick={() => { setFiles([]); setStatus("IDLE"); setResult(null); setError(null); }} disabled={status === "PROCESSING"}>
+          Reset
+        </Button>
+        <Button onClick={handleProcess} disabled={files.length === 0 || status === "PROCESSING"} size="sm" className="gap-2 bg-amber-600 hover:bg-amber-700">
+          {status === "PROCESSING" ? <><Loader2 className="w-3 h-3 animate-spin" />Processing...</> : <><ClipboardList className="w-3 h-3" />Update Benefits</>}
+        </Button>
+      </div>
     </div>
   );
 }

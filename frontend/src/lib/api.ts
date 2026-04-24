@@ -138,6 +138,18 @@ export const extractionApi = {
       },
     });
   },
+  ingestBenefits: (files: File[], year?: string, quarter?: string) => {
+    const formData = new FormData();
+    files.forEach((file) => formData.append("files", file));
+    if (year) formData.append("year", year);
+    if (quarter) formData.append("quarter", quarter);
+    return api.post("/extraction/ingest-benefits", formData, {
+      headers: {
+        "Content-Type": "multipart/form-data",
+        "x-api-key": process.env.NEXT_PUBLIC_API_KEY || "test-secret-key",
+      },
+    });
+  },
 };
 
 // User API functions

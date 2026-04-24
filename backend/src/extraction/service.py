@@ -3,6 +3,7 @@ import structlog
 from io import BytesIO
 from openai import AsyncOpenAI
 from fastapi import HTTPException
+from pydantic import BaseModel
 
 from .schemas import PlanList, DetectedQuarters
 
@@ -224,4 +225,129 @@ STRICT COMPLIANCE RULES:
             quarter=target_quarter,
             error=str(e),
         )
+        raise
+
+
+async def extract_benefits_from_pdf(file_id: str) -> dict:
+    """
+    Extract ONLY benefit details from a benefit summary PDF.
+    Returns a dict with carrier, plan_name, year, and all benefit fields.
+    No rates extracted.
+    """
+    client = get_client()
+    logger.info("Starting benefit extraction", file_id=file_id)
+
+    system_rules = """
+You are a specialized health insurance benefit extractor.
+Extract benefit details ONLY — do NOT extract premium rates.
+
+Extract the following fields from the benefit summary:
+- carrier: Normalize to "IHA", "Univera", "Excellus", or "Highmark"
+- plan_name: Clean name without carrier prefix or HIOS IDs
+- year: Effective year from document dates
+- wellness_benefit: Health & Wellness benefit description
+- deductible_in_ee: In-network individual deductible
+- deductible_in_fam: In-network family deductible
+- in_network_deductible_type: "E" for Embedded, "T" for True Family
+- coinsurance_in: In-network coinsurance percentage
+- oop_max_in_ee: In-network OOP max individual
+- oop_max_in_fam: In-network OOP max family
+- in_network_oop_type: "E" for Embedded, "T" for True Family
+- pcp_copay: Primary care visit cost
+- specialist_copay: Specialist visit cost
+- inpatient_hospital: Inpatient hospitalization cost
+- outpatient_facility: Outpatient Surgical — if plan lists BOTH Hospital and ASC costs separately, use ONLY the ASC (Ambulatory Surgery Center) cost
+- emergency_room: Emergency room cost
+- urgent_care: Urgent care cost
+- deductible_oon_ee: Out-of-network individual deductible
+- deductible_oon_fam: Out-of-network family deductible
+- out_network_deductible_type: "E" for Embedded, "T" for True Family
+- coinsurance_oon: Out-of-network coinsurance
+- oop_max_oon_ee: Out-of-network OOP max individual
+- oop_max_oon_fam: Out-of-network OOP max family
+- out_network_oop_type: "E" for Embedded, "T" for True Family
+- rx_generic: Generic drug copay
+- rx_preferred_brand: Preferred brand drug copay
+- rx_non_preferred_brand: Non-preferred brand drug copay
+- hsa_qualified: "Yes" or "No"
+- creditable_coverage: Extract Medicare Part D creditable coverage status from page 4 — "Creditable Coverage" if creditable, "Non-Creditable Coverage" if not
+- dependent_coverage: Standardize to "Age 26"
+- benefit_allowance_ee: For IHA Activate plans — First Dollar Coverage / Benefit Allowance individual amount (e.g. "$750"). Leave empty if not present.
+- benefit_allowance_fam: For IHA Activate plans — First Dollar Coverage / Benefit Allowance family amount (e.g. "$1,500"). Leave empty if not present.
+
+IHA ACTIVATE PLANS: These plans show "First Dollar Coverage" or "Benefit Allowance" before the deductible.
+Extract the allowance into benefit_allowance_ee and benefit_allowance_fam.
+The deductible_in_ee and deductible_in_fam should be the actual deductible amounts (after the allowance).
+
+VERBIAGE: Convert "X after deductible" to "Deductible then X".
+FORMATTING: Remove "FS" from coinsurance strings.
+
+Return a single plan object with all fields above.
+"""
+
+    class BenefitSummary(BaseModel):
+        carrier: str
+        plan_name: str
+        year: int
+        wellness_benefit: str = ""
+        deductible_in_ee: str = ""
+        deductible_in_fam: str = ""
+        in_network_deductible_type: str = "E"
+        coinsurance_in: str = ""
+        oop_max_in_ee: str = ""
+        oop_max_in_fam: str = ""
+        in_network_oop_type: str = "E"
+        pcp_copay: str = ""
+        specialist_copay: str = ""
+        inpatient_hospital: str = ""
+        outpatient_facility: str = ""
+        emergency_room: str = ""
+        urgent_care: str = ""
+        deductible_oon_ee: str = ""
+        deductible_oon_fam: str = ""
+        out_network_deductible_type: str = "E"
+        coinsurance_oon: str = ""
+        oop_max_oon_ee: str = ""
+        oop_max_oon_fam: str = ""
+        out_network_oop_type: str = "E"
+        rx_generic: str = ""
+        rx_preferred_brand: str = ""
+        rx_non_preferred_brand: str = ""
+        hsa_qualified: str = ""
+        creditable_coverage: str = ""
+        dependent_coverage: str = "Age 26"
+        benefit_allowance_ee: str = ""
+        benefit_allowance_fam: str = ""
+
+    class BenefitSummaryWrapper(BaseModel):
+        plan: BenefitSummary
+
+    try:
+        resp = await client.responses.parse(
+            model="gpt-5.2",
+            reasoning={"effort": "high"},
+            instructions=system_rules,
+            input=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "input_file", "file_id": file_id},
+                        {"type": "input_text", "text": "Extract all benefit details from this benefit summary PDF."},
+                    ],
+                }
+            ],
+            text_format=BenefitSummaryWrapper,
+        )
+
+        result = resp.output_parsed
+        if not result or not result.plan:
+            logger.warning("No benefits extracted from document", file_id=file_id)
+            return {}
+
+        plan_dict = result.plan.model_dump()
+        logger.info("Benefit extraction complete", file_id=file_id, carrier=plan_dict.get("carrier"), plan_name=plan_dict.get("plan_name"))
+        return plan_dict
+
+    except Exception as e:
+        logger.error("Benefit extraction failed", file_id=file_id, error=str(e))
         raise
