@@ -1,7 +1,7 @@
 import asyncio
 import os
 import structlog
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Security, status
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Security, status, BackgroundTasks
 from fastapi.security import APIKeyHeader
 from typing import Annotated, List, Optional
 from .service import extract_from_pdf, upload_pdf, detect_quarters, extract_benefits_from_pdf
@@ -147,16 +147,13 @@ async def _process_single_file(filename: str, content: bytes, quarter_override: 
 
 @router.post("/ingest")
 async def ingest_pdfs(
+        background_tasks: BackgroundTasks,
         files: Annotated[List[UploadFile], File(description="Upload Insurance PDFs to ingest")],
         quarter: Optional[str] = Form(None, description="Override quarter (Q1-Q4). Leave blank to auto-detect."),
         api_key: str = Security(get_api_key),
 ):
     """
-    Ingest one or more insurance PDFs in parallel. For each file:
-    1. Upload PDF to OpenAI (once)
-    2. Detect which quarters are present (or use quarter override)
-    3. Extract all quarters in parallel
-    4. Save plans to DB
+    Ingest one or more insurance PDFs. Returns immediately and processes in background.
     """
     if not files:
         raise HTTPException(status_code=400, detail="No files provided.")
@@ -172,31 +169,30 @@ async def ingest_pdfs(
     if quarter_override and quarter_override not in VALID_QUARTERS:
         raise HTTPException(status_code=400, detail=f"Invalid quarter '{quarter}'. Must be Q1, Q2, Q3, or Q4.")
 
-    filenames = [f.filename for f in files]
-    logger.info("Ingest request received", file_count=len(files), filenames=filenames, quarter_override=quarter_override)
-
-    # Read all file contents first (UploadFile must be read in the request context)
+    # Read all file contents immediately (must be done in request context)
     file_data = []
     for file in files:
         content = await file.read()
         file_data.append((file.filename, content))
 
-    # Process all files in parallel
-    logger.info("Starting parallel file processing", file_count=len(file_data))
-    results_per_file = await asyncio.gather(
-        *[_process_single_file(name, content, quarter_override) for name, content in file_data]
-    )
+    filenames = [f[0] for f in file_data]
+    logger.info("Ingest request received — processing in background", file_count=len(file_data), filenames=filenames)
 
-    total_plans = sum(r.get("total_plans", 0) for r in results_per_file)
-    logger.info(
-        "Ingest complete",
-        total_files=len(files),
-        total_plans_ingested=total_plans,
-    )
+    # Process in background so browser doesn't time out
+    async def run_background():
+        results = await asyncio.gather(
+            *[_process_single_file(name, content, quarter_override) for name, content in file_data]
+        )
+        total_plans = sum(r.get("total_plans", 0) for r in results)
+        logger.info("Background ingest complete", total_files=len(file_data), total_plans_ingested=total_plans)
+
+    background_tasks.add_task(run_background)
+
     return {
-        "total_files": len(files),
-        "total_plans_ingested": total_plans,
-        "files": list(results_per_file),
+        "status": "processing",
+        "message": f"Processing {len(file_data)} file(s) in the background. Check Plan Data tab in 1-2 minutes.",
+        "total_files": len(file_data),
+        "filenames": filenames,
     }
 
 

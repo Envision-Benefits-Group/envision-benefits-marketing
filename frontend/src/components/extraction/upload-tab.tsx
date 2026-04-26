@@ -144,11 +144,16 @@ export function UploadTab({ onIngestionComplete }: UploadTabProps) {
     if (files.length === 0) return;
     setStatus("PROCESSING");
     setProgress(0);
-    setLoadingMessage("Starting extraction...");
+    setLoadingMessage("Uploading files...");
     setError(null);
     try {
       const { data } = await extractionApi.ingest(files, quarter || undefined);
-      setResult(data);
+      // Handle both background (new) and synchronous (old) responses
+      if (data.status === "processing") {
+        setResult({ ...data, total_plans_ingested: 0, total_files: data.total_files, background: true });
+      } else {
+        setResult(data);
+      }
       setStatus("SUCCESS");
       setProgress(100);
       onIngestionComplete();
@@ -304,11 +309,22 @@ export function UploadTab({ onIngestionComplete }: UploadTabProps) {
           <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg flex items-center gap-3">
             <CheckCircle2 className="w-5 h-5 shrink-0" />
             <div>
-              <p className="font-semibold">Ingestion Complete</p>
-              <p className="text-sm opacity-90">
-                {result.total_plans_ingested} plan{result.total_plans_ingested !== 1 ? "s" : ""} ingested from{" "}
-                {result.total_files} file{result.total_files !== 1 ? "s" : ""}
-              </p>
+              {result.background ? (
+                <>
+                  <p className="font-semibold">Files submitted for processing</p>
+                  <p className="text-sm opacity-90">
+                    {result.total_files} file{result.total_files !== 1 ? "s" : ""} are being processed in the background. Check the Plan Data tab in 1-2 minutes to see the extracted plans.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className="font-semibold">Ingestion Complete</p>
+                  <p className="text-sm opacity-90">
+                    {result.total_plans_ingested} plan{result.total_plans_ingested !== 1 ? "s" : ""} ingested from{" "}
+                    {result.total_files} file{result.total_files !== 1 ? "s" : ""}
+                  </p>
+                </>
+              )}
             </div>
           </div>
           {result.files.map((fileResult) => (
