@@ -92,6 +92,12 @@ function PlanCard({ plan, selected, onToggle, role }: {
 }) {
   const style = getCarrierStyle(plan.carrier);
   const ded = plan.medical_details?.deductible_in_ee;
+  const dedFam = plan.medical_details?.deductible_in_fam;
+  const dedDisplay = ded && dedFam && ded !== dedFam
+    ? `EE: ${ded.length > 30 ? ded.substring(0, 30) + "…" : ded} / FAM: ${dedFam.length > 30 ? dedFam.substring(0, 30) + "…" : dedFam}`
+    : ded
+    ? (ded.length > 60 ? ded.substring(0, 60) + "…" : ded)
+    : null;
   return (
     <button
       onClick={onToggle}
@@ -110,9 +116,9 @@ function PlanCard({ plan, selected, onToggle, role }: {
             <span className="text-xs text-gray-400">{plan.quarter} {plan.year}</span>
           </div>
           <p className="text-sm font-semibold text-gray-800 leading-tight">{plan.plan_name}</p>
-          {ded && (
+          {dedDisplay && (
             <p className="text-xs text-gray-500 mt-1 leading-tight">
-              Deductible: {ded.length > 55 ? ded.substring(0, 55) + "…" : ded}
+              Ded: {dedDisplay}
             </p>
           )}
         </div>
@@ -189,14 +195,19 @@ export function ComparisonTab() {
   useEffect(() => { fetchPlans(); }, [fetchPlans]);
 
   const enrolledCandidates = useMemo(() => {
-    return allPlans.filter((p) => {
-      if (selectedCarriers.size > 0 && !Array.from(selectedCarriers).some(c => p.carrier.toUpperCase().includes(c.toUpperCase()))) return false;
-      // Filter by quarter only — not year — so future renewal dates still show available plans
-      if (currentPeriod && p.quarter !== currentPeriod.quarter) return false;
-      if (search && !p.plan_name.toLowerCase().includes(search.toLowerCase())) return false;
-      return true;
-    });
-  }, [allPlans, selectedCarriers, currentPeriod, search]);
+    return allPlans
+      .filter((p) => {
+        if (selectedCarriers.size > 0 && !Array.from(selectedCarriers).some(c => p.carrier.toUpperCase().includes(c.toUpperCase()))) return false;
+        // Filter by quarter only — not year — so future renewal dates still show available plans
+        if (currentPeriod && p.quarter !== currentPeriod.quarter) return false;
+        // Exclude plans from the renewal year — those are the renewal, not the current
+        if (renewalPeriod && p.year === renewalPeriod.year) return false;
+        if (search && !p.plan_name.toLowerCase().includes(search.toLowerCase())) return false;
+        return true;
+      })
+      // Sort most recent year first
+      .sort((a, b) => b.year - a.year);
+  }, [allPlans, selectedCarriers, currentPeriod, renewalPeriod, search]);
 
   const optionCandidates = useMemo(() => {
     return allPlans.filter((p) => {
@@ -215,13 +226,25 @@ export function ComparisonTab() {
     if (!renewalPeriod) return new Set<string>();
     const ids = new Set<string>();
     for (const enrolled of enrolledPlans) {
+      // Find the same plan in the renewal year/quarter
       const match = allPlans.find(p =>
         p.carrier.toLowerCase() === enrolled.carrier.toLowerCase() &&
         p.plan_name.toLowerCase() === enrolled.plan_name.toLowerCase() &&
         p.year === renewalPeriod.year &&
         p.quarter === renewalPeriod.quarter
       );
-      if (match) ids.add(match.plan_id);
+      // If not found in exact renewal year, try most recent available year for that quarter
+      const fallback = !match ? allPlans
+        .filter(p =>
+          p.carrier.toLowerCase() === enrolled.carrier.toLowerCase() &&
+          p.plan_name.toLowerCase() === enrolled.plan_name.toLowerCase() &&
+          p.quarter === renewalPeriod.quarter &&
+          p.year > enrolled.year
+        )
+        .sort((a, b) => b.year - a.year)[0] : null;
+
+      const found = match || fallback;
+      if (found) ids.add(found.plan_id);
     }
     return ids;
   }, [enrolledPlans, allPlans, renewalPeriod]);
@@ -354,7 +377,7 @@ export function ComparisonTab() {
             <div>
               <h2 className="text-lg font-bold" style={{ color: "#0d2240" }}>Select Enrolled Plans</h2>
               <p className="text-sm text-gray-500">
-                Plans the client is <strong>currently enrolled in</strong>. Showing all {currentPeriod?.quarter} plans — select the ones renewing.
+                These are the plans the client is <strong>currently enrolled in</strong> — showing {currentPeriod?.quarter} plans from prior years. Select all plans that are renewing into {renewalPeriod?.quarter} {renewalPeriod?.year}.
               </p>
             </div>
           </div>
