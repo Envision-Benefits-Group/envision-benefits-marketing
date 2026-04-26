@@ -1,97 +1,179 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, DragEvent } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { SelectedPlansPanel } from "@/components/plans/selected-plans-panel";
 import { plansApi } from "@/lib/api";
-import { CalendarDays, ChevronLeft, ChevronRight, GripVertical, LayoutGrid, List, Plus, Search, X, Zap } from "lucide-react";
+import type { Plan } from "@/types/plans";
+import {
+  CalendarDays,
+  ChevronRight,
+  CheckCircle2,
+  Circle,
+  Download,
+  Loader2,
+  Search,
+  X,
+  Check,
+  Building2,
+  FileSpreadsheet,
+  Users,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import type { Plan, MemberCounts } from "@/types/plans";
 
 const CARRIERS = ["IHA", "Highmark", "Univera", "Excellus"];
-const YEARS = [2024, 2025, 2026, 2027];
-const QUARTERS = ["Q1", "Q2", "Q3", "Q4"];
-const PAGE_SIZE = 20;
 
-const CARRIER_COLORS: Record<string, string> = {
-  IHA: "bg-red-600 text-white",
-  "Independent Health": "bg-red-600 text-white",
-  Highmark: "bg-blue-500 text-white",
-  Univera: "bg-lime-500 text-black",
-  Excellus: "bg-blue-600 text-white",
+const CARRIER_COLORS: Record<string, { bg: string; text: string; border: string }> = {
+  IHA:      { bg: "#fee2e2", text: "#991b1b", border: "#fca5a5" },
+  Highmark: { bg: "#dbeafe", text: "#1e40af", border: "#93c5fd" },
+  Univera:  { bg: "#dcfce7", text: "#166534", border: "#86efac" },
+  Excellus: { bg: "#ede9fe", text: "#5b21b6", border: "#c4b5fd" },
 };
 
-function getCarrierClass(carrier: string): string {
-  for (const [key, cls] of Object.entries(CARRIER_COLORS)) {
-    if (carrier.toUpperCase().includes(key.toUpperCase())) return cls;
+function getCarrierStyle(carrier: string) {
+  for (const [key, style] of Object.entries(CARRIER_COLORS)) {
+    if (carrier.toUpperCase().includes(key.toUpperCase())) return style;
   }
-  return "bg-gray-500 text-white";
+  return { bg: "#f1f5f9", text: "#334155", border: "#cbd5e1" };
 }
 
-function formatCurrency(val: number | null): string {
-  if (val == null) return "N/A";
-  return `$${val.toFixed(2)}`;
+function fmt(val: number | null) {
+  if (val == null) return "—";
+  return "$" + val.toLocaleString("en-US", { minimumFractionDigits: 2 });
+}
+
+function quarterFromDate(dateStr: string): { quarter: string; year: number } | null {
+  if (!dateStr) return null;
+  const d = new Date(dateStr + "T00:00:00");
+  const q = "Q" + Math.ceil((d.getMonth() + 1) / 3);
+  return { quarter: q, year: d.getFullYear() };
+}
+
+function StepIndicator({ steps, current }: { steps: string[]; current: number }) {
+  return (
+    <div className="flex items-center gap-0 mb-8">
+      {steps.map((label, i) => {
+        const done = i < current;
+        const active = i === current;
+        return (
+          <div key={i} className="flex items-center">
+            <div className="flex flex-col items-center">
+              <div
+                className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold transition-all"
+                style={{
+                  background: done ? "#0d2240" : active ? "#c9a84c" : "#e2e8f0",
+                  color: (done || active) ? "white" : "#94a3b8",
+                }}
+              >
+                {done ? <Check className="w-4 h-4" /> : i + 1}
+              </div>
+              <span
+                className="text-xs mt-1 font-medium whitespace-nowrap"
+                style={{ color: active ? "#c9a84c" : done ? "#0d2240" : "#94a3b8" }}
+              >
+                {label}
+              </span>
+            </div>
+            {i < steps.length - 1 && (
+              <div
+                className="h-0.5 w-16 mx-1 mb-4 transition-all"
+                style={{ background: i < current ? "#0d2240" : "#e2e8f0" }}
+              />
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function PlanCard({ plan, selected, onToggle, role }: {
+  plan: Plan; selected: boolean; onToggle: () => void; role: "enrolled" | "option";
+}) {
+  const style = getCarrierStyle(plan.carrier);
+  const ded = plan.medical_details?.deductible_in_ee;
+  return (
+    <button
+      onClick={onToggle}
+      className="w-full text-left rounded-xl border-2 p-4 transition-all hover:shadow-md"
+      style={{
+        borderColor: selected ? (role === "enrolled" ? "#0d2240" : "#c9a84c") : "#e2e8f0",
+        background: selected ? (role === "enrolled" ? "rgba(13,34,64,0.04)" : "rgba(201,168,76,0.06)") : "white",
+      }}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: style.bg, color: style.text, border: "1px solid " + style.border }}>
+              {plan.carrier}
+            </span>
+            <span className="text-xs text-gray-400">{plan.quarter} {plan.year}</span>
+          </div>
+          <p className="text-sm font-semibold text-gray-800 leading-tight">{plan.plan_name}</p>
+          {ded && (
+            <p className="text-xs text-gray-500 mt-1 leading-tight">
+              Deductible: {ded.length > 55 ? ded.substring(0, 55) + "…" : ded}
+            </p>
+          )}
+        </div>
+        <div
+          className="w-5 h-5 rounded-full border-2 flex-shrink-0 flex items-center justify-center mt-0.5"
+          style={{
+            borderColor: selected ? (role === "enrolled" ? "#0d2240" : "#c9a84c") : "#cbd5e1",
+            background: selected ? (role === "enrolled" ? "#0d2240" : "#c9a84c") : "white",
+          }}
+        >
+          {selected && <Check className="w-3 h-3 text-white" />}
+        </div>
+      </div>
+      <div className="mt-3 grid grid-cols-4 gap-1">
+        {[["EE Only", plan.ee_only], ["+ Spouse", plan.ee_spouse], ["+ Child(ren)", plan.ee_children], ["Family", plan.family]].map(([label, val]) => (
+          <div key={label as string} className="text-center">
+            <p className="text-xs text-gray-400 leading-tight">{label}</p>
+            <p className="text-xs font-semibold text-gray-700">{fmt(val as number | null)}</p>
+          </div>
+        ))}
+      </div>
+    </button>
+  );
+}
+
+function PlanChip({ plan, role, onRemove }: { plan: Plan; role: "enrolled" | "option"; onRemove: () => void }) {
+  return (
+    <div
+      className="flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-medium"
+      style={{
+        background: role === "enrolled" ? "rgba(13,34,64,0.06)" : "rgba(201,168,76,0.08)",
+        borderColor: role === "enrolled" ? "rgba(13,34,64,0.2)" : "rgba(201,168,76,0.3)",
+        color: role === "enrolled" ? "#0d2240" : "#92711e",
+      }}
+    >
+      <span className="truncate max-w-[160px]">{plan.plan_name}</span>
+      <span className="text-gray-400 shrink-0">{plan.quarter} {plan.year}</span>
+      <button onClick={onRemove} className="ml-1 hover:opacity-70 shrink-0">
+        <X className="w-3 h-3" />
+      </button>
+    </div>
+  );
 }
 
 export function ComparisonTab() {
-  // ── All plans fetched independently ───────────────────────────────
+  const [step, setStep] = useState(0);
   const [allPlans, setAllPlans] = useState<Plan[]>([]);
   const [loadingPlans, setLoadingPlans] = useState(false);
-
-  // ── Period selectors ──────────────────────────────────────────────
-  const [currentYear, setCurrentYear]       = useState<number | undefined>();
-  const [currentQuarter, setCurrentQuarter] = useState<string | undefined>();
-  const [renewalYear, setRenewalYear]       = useState<number | undefined>();
-  const [renewalQuarter, setRenewalQuarter] = useState<string | undefined>();
-
-  // ── Browse filter (carrier only — period is handled by selectors) ─
-  const [carrierFilters, setCarrierFilters] = useState<Set<string>>(new Set());
+  const [renewalDate, setRenewalDate] = useState("");
+  const [selectedCarriers, setSelectedCarriers] = useState<Set<string>>(new Set());
+  const [enrolledIds, setEnrolledIds] = useState<Set<string>>(new Set());
+  const [optionIds, setOptionIds] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState("");
-  const [viewMode, setViewMode] = useState<"list" | "grid">("list");
-
-  // ── Pagination ────────────────────────────────────────────────────
-  const [page, setPage] = useState(1);
-
-  // ── Selections ────────────────────────────────────────────────────
-  const [selectedCurrentIds, setSelectedCurrentIds] = useState<Set<string>>(new Set());
-  const [selectedRenewalIds, setSelectedRenewalIds] = useState<Set<string>>(new Set());
-  const [selectedOptionIds,  setSelectedOptionIds]  = useState<Set<string>>(new Set());
-
-  // Track current → renewal pairing so we can remove both together
-  const [currentToRenewal, setCurrentToRenewal] = useState<Map<string, string>>(new Map());
-
   const [isGenerating, setIsGenerating] = useState(false);
-  const [dropTarget, setDropTarget] = useState<"current" | "option" | null>(null);
 
-  // ── Auto-Renewal state ─────────────────────────────────────────────
-  const [renewalDate, setRenewalDate] = useState<string>("");
-  const [isAutoGenerating, setIsAutoGenerating] = useState(false);
+  const renewalPeriod = useMemo(() => quarterFromDate(renewalDate), [renewalDate]);
+  const currentPeriod = useMemo(() => {
+    if (!renewalPeriod) return null;
+    return { quarter: renewalPeriod.quarter, year: renewalPeriod.year - 1 };
+  }, [renewalPeriod]);
 
-  // Refs so the re-pair effect can read latest state without circular deps
-  const latestCurrentIds     = useRef(selectedCurrentIds);
-  const latestCurrentToRenewal = useRef(currentToRenewal);
-  useEffect(() => { latestCurrentIds.current = selectedCurrentIds; }, [selectedCurrentIds]);
-  useEffect(() => { latestCurrentToRenewal.current = currentToRenewal; }, [currentToRenewal]);
-
-  // ── Fetch all plans once ──────────────────────────────────────────
   const fetchPlans = useCallback(async () => {
     setLoadingPlans(true);
     try {
@@ -106,235 +188,85 @@ export function ComparisonTab() {
 
   useEffect(() => { fetchPlans(); }, [fetchPlans]);
 
-  // ── Plans visible in the table (current period + optional carriers) ─
-  const tablePlans = useMemo(() => {
+  const enrolledCandidates = useMemo(() => {
     return allPlans.filter((p) => {
-      if (currentYear    && p.year    !== currentYear)    return false;
-      if (currentQuarter && p.quarter !== currentQuarter) return false;
-      if (carrierFilters.size > 0 && !Array.from(carrierFilters).some((cf) =>
-        p.carrier.toUpperCase().includes(cf.toUpperCase())
-      )) return false;
+      if (selectedCarriers.size > 0 && !Array.from(selectedCarriers).some(c => p.carrier.toUpperCase().includes(c.toUpperCase()))) return false;
+      if (currentPeriod && (p.year !== currentPeriod.year || p.quarter !== currentPeriod.quarter)) return false;
+      if (search && !p.plan_name.toLowerCase().includes(search.toLowerCase())) return false;
       return true;
     });
-  }, [allPlans, currentYear, currentQuarter, carrierFilters]);
+  }, [allPlans, selectedCarriers, currentPeriod, search]);
 
-  const visiblePlans = useMemo(() => {
-    if (!search.trim()) return tablePlans;
-    const q = search.toLowerCase();
-    return tablePlans.filter((p) => p.plan_name.toLowerCase().includes(q));
-  }, [tablePlans, search]);
+  const optionCandidates = useMemo(() => {
+    return allPlans.filter((p) => {
+      if (selectedCarriers.size > 0 && !Array.from(selectedCarriers).some(c => p.carrier.toUpperCase().includes(c.toUpperCase()))) return false;
+      if (renewalPeriod && (p.year !== renewalPeriod.year || p.quarter !== renewalPeriod.quarter)) return false;
+      if (search && !p.plan_name.toLowerCase().includes(search.toLowerCase())) return false;
+      return true;
+    });
+  }, [allPlans, selectedCarriers, renewalPeriod, search]);
 
-  // Reset page when filters or search change
-  useEffect(() => { setPage(1); }, [currentYear, currentQuarter, carrierFilters, search]);
+  const enrolledPlans = useMemo(() => allPlans.filter(p => enrolledIds.has(p.plan_id)), [allPlans, enrolledIds]);
+  const optionPlans = useMemo(() => allPlans.filter(p => optionIds.has(p.plan_id)), [allPlans, optionIds]);
 
-  const totalPages = Math.max(1, Math.ceil(visiblePlans.length / PAGE_SIZE));
-  const paginatedPlans = useMemo(
-    () => visiblePlans.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
-    [visiblePlans, page]
-  );
-
-  // ── Auto-find the renewal counterpart for a given plan ────────────
-  const findRenewal = useCallback(
-    (plan: Plan): Plan | undefined => {
-      if (!renewalYear && !renewalQuarter) return undefined;
-
-      const norm = (s: string) => s.trim().toLowerCase();
-      const planName    = norm(plan.plan_name);
-      const planCarrier = norm(plan.carrier);
-
-      console.log("[findRenewal] searching for:", {
-        carrier: planCarrier,
-        plan_name: planName,
-        renewalYear,
-        renewalQuarter,
-        totalPlans: allPlans.length,
-      });
-
-      const match = allPlans.find(
-        (p) =>
-          norm(p.carrier)   === planCarrier &&
-          norm(p.plan_name) === planName &&
-          (!renewalYear    || p.year    === renewalYear) &&
-          (!renewalQuarter || p.quarter === renewalQuarter)
+  const renewalIds = useMemo(() => {
+    if (!renewalPeriod) return new Set<string>();
+    const ids = new Set<string>();
+    for (const enrolled of enrolledPlans) {
+      const match = allPlans.find(p =>
+        p.carrier.toLowerCase() === enrolled.carrier.toLowerCase() &&
+        p.plan_name.toLowerCase() === enrolled.plan_name.toLowerCase() &&
+        p.year === renewalPeriod.year &&
+        p.quarter === renewalPeriod.quarter
       );
-
-      console.log("[findRenewal] result:", match
-        ? `${match.plan_name} (${match.quarter} ${match.year})`
-        : "NOT FOUND — available plans for this name:",
-        !match
-          ? allPlans
-              .filter((p) => norm(p.plan_name) === planName)
-              .map((p) => `${p.carrier} / ${p.quarter} ${p.year}`)
-          : ""
-      );
-
-      return match;
-    },
-    [allPlans, renewalYear, renewalQuarter]
-  );
-
-  // ── Re-pair when renewal period changes or allPlans reloads ──────
-  // Handles the case where user sets the renewal period AFTER selecting
-  // current plans (the most common workflow).
-  useEffect(() => {
-    if (!renewalYear && !renewalQuarter) return;
-
-    const currentIds = latestCurrentIds.current;
-    const pairings   = latestCurrentToRenewal.current;
-
-    // Only re-pair current plans that don't have a renewal yet
-    const unpaired = Array.from(currentIds).filter((id) => !pairings.has(id));
-    if (unpaired.length === 0) return;
-
-    const newPairings = new Map(pairings);
-    const toAdd: string[] = [];
-
-    for (const planId of unpaired) {
-      const plan = allPlans.find((p) => p.plan_id === planId);
-      if (!plan) continue;
-      const renewal = findRenewal(plan);
-      if (renewal) {
-        toAdd.push(renewal.plan_id);
-        newPairings.set(planId, renewal.plan_id);
-      }
+      if (match) ids.add(match.plan_id);
     }
+    return ids;
+  }, [enrolledPlans, allPlans, renewalPeriod]);
 
-    if (toAdd.length > 0) {
-      setSelectedRenewalIds((prev) => {
-        const n = new Set(prev);
-        toAdd.forEach((id) => n.add(id));
-        return n;
-      });
-      setCurrentToRenewal(newPairings);
-      toast.success(
-        `Auto-paired ${toAdd.length} renewal plan${toAdd.length > 1 ? "s" : ""}`
-      );
-    } else if (unpaired.length > 0) {
-      toast.warning(
-        `No renewal match found for ${unpaired.length} plan${unpaired.length > 1 ? "s" : ""} in ${renewalQuarter ?? ""} ${renewalYear ?? ""}. Check console for details.`.trim()
-      );
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [renewalYear, renewalQuarter, findRenewal, allPlans]);
-
-  // ── Add as Current + auto-pair Renewal ───────────────────────────
-  const handleAddAsCurrent = useCallback(
-    (plan: Plan) => {
-      // Toggle off
-      if (selectedCurrentIds.has(plan.plan_id)) {
-        handleRemoveCurrent(plan.plan_id);
-        return;
-      }
-
-      // Remove from option bucket if it was there
-      setSelectedOptionIds((p) => { const n = new Set(p); n.delete(plan.plan_id); return n; });
-      setSelectedCurrentIds((p) => new Set(p).add(plan.plan_id));
-
-      if (!renewalYear && !renewalQuarter) {
-        // No renewal period set — try to auto-detect one from available plans.
-        // Find other versions of this same plan (same carrier + name, different period).
-        const norm = (s: string) => s.trim().toLowerCase();
-        const candidates = allPlans.filter(
-          (p) =>
-            norm(p.carrier)   === norm(plan.carrier) &&
-            norm(p.plan_name) === norm(plan.plan_name) &&
-            p.plan_id !== plan.plan_id
-        );
-
-        if (candidates.length > 0) {
-          // Pick the most recent period (highest year, then latest quarter)
-          candidates.sort((a, b) =>
-            a.year !== b.year ? b.year - a.year : b.quarter.localeCompare(a.quarter)
-          );
-          const best = candidates[0];
-          // Setting these triggers the re-pair useEffect which will do the pairing
-          setRenewalYear(best.year);
-          setRenewalQuarter(best.quarter);
-          toast.success(
-            `Auto-detected Renewal Period: ${best.quarter} ${best.year} — pairing renewal plans…`
-          );
-        } else {
-          toast.warning(
-            `No other period found for "${plan.plan_name}". Set the Renewal Period manually.`
-          );
-        }
-        return;
-      }
-
-      const renewal = findRenewal(plan);
-      if (renewal) {
-        setSelectedRenewalIds((p) => new Set(p).add(renewal.plan_id));
-        setCurrentToRenewal((m) => new Map(m).set(plan.plan_id, renewal.plan_id));
-        toast.success(
-          `Auto-paired: ${renewal.plan_name} (${renewal.quarter} ${renewal.year})`
-        );
-      } else {
-        toast.warning(
-          `No renewal match found for "${plan.plan_name}" in ${renewalQuarter ?? ""} ${renewalYear ?? ""}. Check browser console for details.`.trim()
-        );
-      }
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [selectedCurrentIds, renewalYear, renewalQuarter, findRenewal, allPlans]
-  );
-
-  // ── Add as Option ─────────────────────────────────────────────────
-  const handleAddAsOption = (plan: Plan) => {
-    if (selectedOptionIds.has(plan.plan_id)) {
-      setSelectedOptionIds((p) => { const n = new Set(p); n.delete(plan.plan_id); return n; });
-      return;
-    }
-    // Remove from current/renewal if it was there
-    setSelectedCurrentIds((p) => { const n = new Set(p); n.delete(plan.plan_id); return n; });
-    setSelectedRenewalIds((p) => { const n = new Set(p); n.delete(plan.plan_id); return n; });
-    setSelectedOptionIds((p)  => new Set(p).add(plan.plan_id));
-  };
-
-  // ── Remove handlers ───────────────────────────────────────────────
-  const handleRemoveCurrent = (planId: string) => {
-    setSelectedCurrentIds((p) => { const n = new Set(p); n.delete(planId); return n; });
-    // Remove paired renewal
-    const renewalId = currentToRenewal.get(planId);
-    if (renewalId) {
-      setSelectedRenewalIds((p) => { const n = new Set(p); n.delete(renewalId); return n; });
-      setCurrentToRenewal((m) => { const n = new Map(m); n.delete(planId); return n; });
-    }
-  };
-  const handleRemoveRenewal = (planId: string) => {
-    setSelectedRenewalIds((p) => { const n = new Set(p); n.delete(planId); return n; });
-    // Break pairing
-    setCurrentToRenewal((m) => {
-      const n = new Map(m);
-      for (const [k, v] of n.entries()) { if (v === planId) { n.delete(k); break; } }
+  const toggleCarrier = (c: string) => {
+    setSelectedCarriers(prev => {
+      const n = new Set(prev);
+      if (n.has(c)) n.delete(c); else n.add(c);
       return n;
     });
   };
-  const handleRemoveOption = (planId: string) =>
-    setSelectedOptionIds((p) => { const n = new Set(p); n.delete(planId); return n; });
 
-  // ── Generate ──────────────────────────────────────────────────────
-  const handleGenerateComparison = async () => {
-    const currentIds = Array.from(selectedCurrentIds);
-    const renewalIds = Array.from(selectedRenewalIds);
-    const optionIds  = Array.from(selectedOptionIds);
-    if (!currentIds.length && !renewalIds.length && !optionIds.length) {
+  const toggleEnrolled = (plan: Plan) => {
+    setEnrolledIds(prev => {
+      const n = new Set(prev);
+      if (n.has(plan.plan_id)) n.delete(plan.plan_id); else n.add(plan.plan_id);
+      return n;
+    });
+  };
+
+  const toggleOption = (plan: Plan) => {
+    setOptionIds(prev => {
+      const n = new Set(prev);
+      if (n.has(plan.plan_id)) n.delete(plan.plan_id); else n.add(plan.plan_id);
+      return n;
+    });
+  };
+
+  const handleGenerate = async () => {
+    if (enrolledIds.size === 0 && optionIds.size === 0) {
       toast.error("Select at least one plan");
       return;
     }
     setIsGenerating(true);
     try {
       const { data } = await plansApi.generateComparison({
-        current_plan_ids: currentIds,
-        renewal_plan_ids: renewalIds,
-        option_plan_ids:  optionIds,
+        current_plan_ids: enrolledPlans.map(p => p.plan_id),
+        renewal_plan_ids: Array.from(renewalIds),
+        option_plan_ids: Array.from(optionIds),
       });
       const url = window.URL.createObjectURL(new Blob([data]));
       const a = document.createElement("a");
       a.href = url;
-      a.download = "Marketing-Renewal-Comparison.xlsx";
+      a.download = "Marketing-Renewal-Comparison" + (renewalDate ? "-" + renewalDate : "") + ".xlsx";
       a.click();
       window.URL.revokeObjectURL(url);
-      toast.success("Comparison Excel downloaded");
+      toast.success("Comparison grid downloaded!");
     } catch {
       toast.error("Failed to generate comparison");
     } finally {
@@ -342,512 +274,265 @@ export function ComparisonTab() {
     }
   };
 
-  // ── Auto-Renewal Generate ─────────────────────────────────────────
-  const handleAutoRenewal = async () => {
-    if (!renewalDate) {
-      toast.error("Enter a renewal effective date");
-      return;
-    }
-    // Need at least selected renewal-period plans (the enrolled plans)
-    const renewalIds = Array.from(selectedRenewalIds);
-    const currentIds = Array.from(selectedCurrentIds);
-    // Use renewal IDs if available, otherwise fall back to current IDs
-    const enrolledIds = renewalIds.length > 0 ? renewalIds : currentIds;
-    const optionIds = Array.from(selectedOptionIds);
-
-    if (!enrolledIds.length) {
-      toast.error("Select the enrolled plans first (from the renewal period), then click Auto-Renewal");
-      return;
-    }
-
-    setIsAutoGenerating(true);
-    try {
-      const { data } = await plansApi.generateAutoRenewal({
-        renewal_effective_date: renewalDate,
-        enrolled_plan_ids: enrolledIds,
-        option_plan_ids: optionIds,
-      });
-      const url = window.URL.createObjectURL(new Blob([data]));
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `Renewal-Grid-${renewalDate}.xlsx`;
-      a.click();
-      window.URL.revokeObjectURL(url);
-      toast.success("Auto-Renewal Grid downloaded");
-    } catch (err: any) {
-      const detail = err?.response?.data?.detail || "Failed to generate auto-renewal grid";
-      toast.error(detail);
-    } finally {
-      setIsAutoGenerating(false);
-    }
-  };
-
-  // ── Selection state for row highlighting ──────────────────────────
-  const getState = (planId: string) => {
-    if (selectedCurrentIds.has(planId)) return "current";
-    if (selectedRenewalIds.has(planId)) return "renewal";
-    if (selectedOptionIds.has(planId))  return "option";
-    return null;
-  };
-
-  // ── Drag & drop ───────────────────────────────────────────────────
-  const handleDragStart = (e: DragEvent, planId: string) => {
-    e.dataTransfer.setData("text/plain", planId);
-    e.dataTransfer.effectAllowed = "copy";
-  };
-  const handleDragOver = (e: DragEvent, target: "current" | "option") => {
-    e.preventDefault();
-    setDropTarget(target);
-  };
-  const handleDragLeave = () => setDropTarget(null);
-  const handleDrop = (e: DragEvent, target: "current" | "option") => {
-    e.preventDefault();
-    setDropTarget(null);
-    const planId = e.dataTransfer.getData("text/plain");
-    const plan = allPlans.find((p) => p.plan_id === planId);
-    if (!plan) return;
-    if (target === "current") handleAddAsCurrent(plan);
-    else handleAddAsOption(plan);
-  };
-
-  const periodLabel = currentYear || currentQuarter
-    ? `${currentQuarter ?? ""} ${currentYear ?? ""}`.trim()
-    : "all periods";
+  const canProceedStep1 = renewalDate && selectedCarriers.size > 0;
+  const canProceedStep2 = enrolledIds.size > 0;
+  const STEPS = ["Renewal Setup", "Enrolled Plans", "Options", "Generate"];
 
   return (
-    <div className="space-y-4">
+    <div className="max-w-4xl mx-auto">
+      <StepIndicator steps={STEPS} current={step} />
 
-      {/* ── Auto-Renewal Quick Action ─────────────────────────────── */}
-      <div className="border-2 border-dashed border-blue-300 rounded-lg p-4 bg-blue-50/30">
-        <div className="flex items-center gap-2 mb-3">
-          <Zap className="h-4 w-4 text-blue-600" />
-          <p className="text-sm font-semibold text-blue-900">Auto-Renewal Grid</p>
-          <span className="text-xs text-blue-600 bg-blue-100 px-2 py-0.5 rounded-full">New</span>
-        </div>
-        <p className="text-xs text-blue-700 mb-3">
-          Enter the renewal effective date. The system will automatically find prior-year same-quarter
-          rates and generate the comparison grid. Select enrolled plans from the renewal period below first.
-        </p>
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2">
-            <CalendarDays className="h-4 w-4 text-blue-500" />
-            <Input
-              type="date"
-              value={renewalDate}
-              onChange={(e) => setRenewalDate(e.target.value)}
-              className="w-44 h-9 bg-white"
-              placeholder="Renewal date"
-            />
-          </div>
-          <Button
-            onClick={handleAutoRenewal}
-            disabled={isAutoGenerating || !renewalDate}
-            className="h-9 gap-2 bg-blue-600 hover:bg-blue-700"
-          >
-            <Zap className="h-3.5 w-3.5" />
-            {isAutoGenerating ? "Generating..." : "Generate Auto-Renewal"}
-          </Button>
-          {renewalDate && (
-            <span className="text-xs text-blue-600">
-              → Compares {(() => {
-                const d = new Date(renewalDate + "T00:00:00");
-                const q = `Q${Math.ceil((d.getMonth() + 1) / 3)}`;
-                return `${q} ${d.getFullYear() - 1} vs ${q} ${d.getFullYear()}`;
-              })()}
-            </span>
-          )}
-        </div>
-      </div>
-
-      {/* ── Period selectors ───────────────────────────────────────── */}
-      <div className="grid grid-cols-2 gap-4">
-        {/* Current Period */}
-        <div className="border rounded-lg p-3 space-y-2">
-          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Current Period (enrolled)
-          </p>
-          <div className="flex gap-2">
-            <Select
-              value={currentYear?.toString() ?? ""}
-              onValueChange={(v) => setCurrentYear(v ? Number(v) : undefined)}
-            >
-              <SelectTrigger className="flex-1">
-                <SelectValue placeholder="Year" />
-              </SelectTrigger>
-              <SelectContent>
-                {YEARS.map((y) => (
-                  <SelectItem key={y} value={y.toString()}>{y}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select
-              value={currentQuarter ?? ""}
-              onValueChange={(v) => setCurrentQuarter(v || undefined)}
-            >
-              <SelectTrigger className="flex-1">
-                <SelectValue placeholder="Quarter" />
-              </SelectTrigger>
-              <SelectContent>
-                {QUARTERS.map((q) => (
-                  <SelectItem key={q} value={q}>{q}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {(currentYear || currentQuarter) && (
-              <Button variant="ghost" size="icon" onClick={() => { setCurrentYear(undefined); setCurrentQuarter(undefined); }}>
-                <X className="h-4 w-4" />
-              </Button>
-            )}
-          </div>
-        </div>
-
-        {/* Renewal Period */}
-        <div className="border rounded-lg p-3 space-y-2 bg-yellow-50/50">
-          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Renewal Period (auto-paired)
-          </p>
-          <div className="flex gap-2">
-            <Select
-              value={renewalYear?.toString() ?? ""}
-              onValueChange={(v) => setRenewalYear(v ? Number(v) : undefined)}
-            >
-              <SelectTrigger className="flex-1">
-                <SelectValue placeholder="Year" />
-              </SelectTrigger>
-              <SelectContent>
-                {YEARS.map((y) => (
-                  <SelectItem key={y} value={y.toString()}>{y}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select
-              value={renewalQuarter ?? ""}
-              onValueChange={(v) => setRenewalQuarter(v || undefined)}
-            >
-              <SelectTrigger className="flex-1">
-                <SelectValue placeholder="Quarter" />
-              </SelectTrigger>
-              <SelectContent>
-                {QUARTERS.map((q) => (
-                  <SelectItem key={q} value={q}>{q}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {(renewalYear || renewalQuarter) && (
-              <Button variant="ghost" size="icon" onClick={() => { setRenewalYear(undefined); setRenewalQuarter(undefined); }}>
-                <X className="h-4 w-4" />
-              </Button>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* ── Browse filters ─────────────────────────────────────────── */}
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="relative">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
-          <Input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search plans..."
-            className="pl-8 w-[200px] h-9"
-          />
-        </div>
-
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-xs text-muted-foreground font-medium">Carriers:</span>
-          {CARRIERS.map((c) => {
-            const active = carrierFilters.has(c);
-            return (
-              <button
-                key={c}
-                onClick={() => {
-                  setCarrierFilters((prev) => {
-                    const next = new Set(prev);
-                    if (next.has(c)) next.delete(c);
-                    else next.add(c);
-                    return next;
-                  });
-                }}
-                className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
-                  active
-                    ? "bg-primary text-primary-foreground border-primary"
-                    : "bg-white text-gray-600 border-gray-300 hover:border-gray-500"
-                }`}
-              >
-                {c}
-              </button>
-            );
-          })}
-          {carrierFilters.size > 0 && (
-            <button
-              onClick={() => setCarrierFilters(new Set())}
-              className="text-xs text-muted-foreground underline hover:text-gray-900"
-            >
-              Clear
-            </button>
-          )}
-        </div>
-
-        <div className="ml-auto flex border rounded-md">
-          <Button
-            variant={viewMode === "list" ? "default" : "ghost"}
-            size="icon" className="h-8 w-8 rounded-r-none"
-            onClick={() => setViewMode("list")}
-          >
-            <List className="h-4 w-4" />
-          </Button>
-          <Button
-            variant={viewMode === "grid" ? "default" : "ghost"}
-            size="icon" className="h-8 w-8 rounded-l-none"
-            onClick={() => setViewMode("grid")}
-          >
-            <LayoutGrid className="h-4 w-4" />
-          </Button>
-        </div>
-      </div>
-
-      <p className="text-xs text-muted-foreground">
-        Showing plans for <strong>{periodLabel}</strong>. Click <strong>Select</strong> to add a plan as Current and auto-pair its Renewal. Click <strong>Option</strong> for alternative plans (toggle carriers above to browse).
-      </p>
-
-      <div className="flex gap-6">
-        {/* ── Plan picker ──────────────────────────────────────────── */}
-        <div className="flex-1 min-w-0">
-          {loadingPlans ? (
-            <div className="text-center py-12 text-muted-foreground">Loading plans…</div>
-          ) : visiblePlans.length === 0 ? (
-            <div className="text-center py-12 text-muted-foreground">
-              {tablePlans.length === 0
-                ? "No plans found. Select a period or upload PDFs first."
-                : `No plans match "${search}".`}
+      {step === 0 && (
+        <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-8">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: "#0d2240" }}>
+              <CalendarDays className="w-5 h-5 text-white" />
             </div>
-          ) : viewMode === "list" ? (
-            <div className="border rounded-lg overflow-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-[30px]" />
-                    <TableHead>Carrier</TableHead>
-                    <TableHead className="min-w-[180px]">Plan Name</TableHead>
-                    <TableHead>Quarter</TableHead>
-                    <TableHead>Year</TableHead>
-                    <TableHead className="text-right">EE Only</TableHead>
-                    <TableHead className="w-[180px]" />
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {paginatedPlans.map((plan) => {
-                    const state = getState(plan.plan_id);
-                    return (
-                      <TableRow
-                        key={plan.plan_id}
-                        draggable
-                        onDragStart={(e) => handleDragStart(e, plan.plan_id)}
-                        className={`${state !== "renewal" ? "cursor-grab active:cursor-grabbing" : "cursor-default"} ${
-                          state === "current" ? "bg-blue-50" :
-                          state === "renewal" ? "bg-amber-50 opacity-60" :
-                          state === "option"  ? "bg-green-50" : ""
-                        }`}
-                      >
-                        <TableCell className="px-2">
-                          <GripVertical className="h-4 w-4 text-muted-foreground" />
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant="outline" className="text-xs">{plan.carrier}</Badge>
-                        </TableCell>
-                        <TableCell className="font-medium text-sm">{plan.plan_name}</TableCell>
-                        <TableCell className="text-sm">{plan.quarter}</TableCell>
-                        <TableCell className="text-sm">{plan.year}</TableCell>
-                        <TableCell className="text-right text-sm">
-                          {plan.ee_only != null
-                            ? `$${plan.ee_only.toLocaleString("en-US", { minimumFractionDigits: 2 })}`
-                            : "-"}
-                        </TableCell>
-                        <TableCell>
-                          {state === "renewal" ? (
-                            <span className="inline-flex items-center gap-1 text-xs text-amber-700 bg-amber-100 border border-amber-300 rounded px-2 py-1 font-medium select-none">
-                              🔒 Auto-paired Renewal
-                            </span>
-                          ) : (
-                            <div className="flex gap-1.5">
-                              <Button
-                                size="sm"
-                                variant={state === "current" ? "default" : "outline"}
-                                className="h-7 text-xs"
-                                onClick={() => handleAddAsCurrent(plan)}
-                              >
-                                {state === "current" ? "Current ✓" : "Select"}
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant={state === "option" ? "default" : "outline"}
-                                className="h-7 text-xs"
-                                onClick={() => handleAddAsOption(plan)}
-                              >
-                                {state === "option" ? "Option ✓" : "Option"}
-                              </Button>
-                            </div>
-                          )}
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
+            <div>
+              <h2 className="text-lg font-bold" style={{ color: "#0d2240" }}>Renewal Setup</h2>
+              <p className="text-sm text-gray-500">Enter the renewal effective date and select which carriers are renewing</p>
             </div>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {paginatedPlans.map((plan) => {
-                const state = getState(plan.plan_id);
-                return (
-                  <Card
-                    key={plan.plan_id}
-                    draggable={state !== "renewal"}
-                    onDragStart={(e) => state !== "renewal" && handleDragStart(e, plan.plan_id)}
-                    className={`transition-all hover:shadow-md ${
-                      state === "renewal" ? "opacity-60 cursor-default" : "cursor-grab active:cursor-grabbing"
-                    } ${
-                      state === "current" ? "ring-2 ring-blue-500" :
-                      state === "option"  ? "ring-2 ring-green-500" :
-                      state === "renewal" ? "ring-2 ring-amber-400" : ""
-                    }`}
-                  >
-                    <CardHeader className="pb-2">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="space-y-1 min-w-0">
-                          <Badge className={getCarrierClass(plan.carrier)}>{plan.carrier}</Badge>
-                          <h3 className="text-sm font-medium leading-tight truncate">{plan.plan_name}</h3>
-                        </div>
-                        <GripVertical className="h-4 w-4 text-muted-foreground shrink-0 mt-1" />
-                      </div>
-                      <div className="flex gap-2 text-xs text-muted-foreground">
-                        <span>{plan.quarter} {plan.year}</span>
-                        <span>{plan.plan_type}</span>
-                      </div>
-                    </CardHeader>
-                    <CardContent className="pt-0">
-                      <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs mb-3">
-                        {[
-                          ["EE Only", plan.ee_only],
-                          ["EE+Spouse", plan.ee_spouse],
-                          ["EE+Child", plan.ee_children],
-                          ["Family", plan.family],
-                        ].map(([label, val]) => (
-                          <div key={label as string} className="flex justify-between">
-                            <span className="text-muted-foreground">{label}</span>
-                            <span className="font-medium">{formatCurrency(val as number | null)}</span>
-                          </div>
-                        ))}
-                      </div>
-                      {state === "renewal" ? (
-                        <div className="flex items-center justify-center gap-1 text-xs text-amber-700 bg-amber-100 border border-amber-300 rounded px-2 py-1.5 font-medium select-none">
-                          🔒 Auto-paired Renewal
-                        </div>
-                      ) : (
-                        <div className="flex gap-1">
-                          <Button
-                            variant={state === "current" ? "default" : "outline"}
-                            size="sm" className="flex-1 h-7 text-xs"
-                            onClick={() => handleAddAsCurrent(plan)}
-                          >
-                            <Plus className="h-3 w-3 mr-1" />
-                            {state === "current" ? "Current ✓" : "Select"}
-                          </Button>
-                          <Button
-                            variant={state === "option" ? "default" : "outline"}
-                            size="sm" className="flex-1 h-7 text-xs"
-                            onClick={() => handleAddAsOption(plan)}
-                          >
-                            <Plus className="h-3 w-3 mr-1" />
-                            {state === "option" ? "Option ✓" : "Option"}
-                          </Button>
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-                );
-              })}
-            </div>
-          )}
-
-          {visiblePlans.length > 0 && (
-            <div className="flex items-center justify-between mt-3">
-              <p className="text-xs text-muted-foreground">
-                Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, visiblePlans.length)} of {visiblePlans.length} plan{visiblePlans.length !== 1 ? "s" : ""}
-              </p>
-              {totalPages > 1 && (
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-7 px-2"
-                    onClick={() => setPage((p) => p - 1)}
-                    disabled={page === 1}
-                  >
-                    <ChevronLeft className="h-4 w-4" />
-                  </Button>
-                  <span className="text-xs text-muted-foreground">
-                    Page {page} of {totalPages}
+          </div>
+          <div className="space-y-6">
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-2">
+                Renewal Effective Date <span className="text-red-500">*</span>
+              </label>
+              <Input type="date" value={renewalDate} onChange={(e) => setRenewalDate(e.target.value)} className="w-56" />
+              {renewalPeriod && (
+                <div className="mt-2 flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-green-500" />
+                  <span className="text-sm text-gray-600">
+                    Compares <strong>{currentPeriod?.quarter} {currentPeriod?.year}</strong> (current) vs <strong>{renewalPeriod.quarter} {renewalPeriod.year}</strong> (renewal)
                   </span>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-7 px-2"
-                    onClick={() => setPage((p) => p + 1)}
-                    disabled={page === totalPages}
-                  >
-                    <ChevronRight className="h-4 w-4" />
-                  </Button>
                 </div>
               )}
             </div>
-          )}
-        </div>
-
-        {/* ── Right panel ───────────────────────────────────────────── */}
-        <div className="w-72 shrink-0 space-y-3">
-          {/* Drop zones */}
-          <div className="grid grid-cols-2 gap-2">
-            <div
-              onDragOver={(e) => handleDragOver(e, "current")}
-              onDragLeave={handleDragLeave}
-              onDrop={(e) => handleDrop(e, "current")}
-              className={`border-2 border-dashed rounded-lg p-3 text-center text-xs transition-colors ${
-                dropTarget === "current"
-                  ? "border-blue-500 bg-blue-50 text-blue-700"
-                  : "border-slate-300 text-muted-foreground"
-              }`}
-            >
-              Drop to<br /><span className="font-semibold">Select</span>
-            </div>
-            <div
-              onDragOver={(e) => handleDragOver(e, "option")}
-              onDragLeave={handleDragLeave}
-              onDrop={(e) => handleDrop(e, "option")}
-              className={`border-2 border-dashed rounded-lg p-3 text-center text-xs transition-colors ${
-                dropTarget === "option"
-                  ? "border-green-500 bg-green-50 text-green-700"
-                  : "border-slate-300 text-muted-foreground"
-              }`}
-            >
-              Drop as<br /><span className="font-semibold">Option</span>
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-2">
+                Which carriers are renewing? <span className="text-red-500">*</span>
+              </label>
+              <p className="text-xs text-gray-500 mb-3">Select all carriers included in this renewal. You can select multiple.</p>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                {CARRIERS.map((c) => {
+                  const active = selectedCarriers.has(c);
+                  const style = getCarrierStyle(c);
+                  return (
+                    <button
+                      key={c}
+                      onClick={() => toggleCarrier(c)}
+                      className="flex items-center gap-3 p-4 rounded-xl border-2 transition-all text-left"
+                      style={{ borderColor: active ? "#0d2240" : "#e2e8f0", background: active ? "rgba(13,34,64,0.05)" : "white" }}
+                    >
+                      <div className="w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold shrink-0" style={{ background: style.bg, color: style.text }}>
+                        {c[0]}
+                      </div>
+                      <p className="text-sm font-semibold text-gray-800">{c}</p>
+                      {active && <Check className="w-4 h-4 ml-auto shrink-0" style={{ color: "#0d2240" }} />}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           </div>
-
-          <SelectedPlansPanel
-            plans={allPlans}
-            selectedCurrentIds={selectedCurrentIds}
-            selectedRenewalIds={selectedRenewalIds}
-            selectedOptionIds={selectedOptionIds}
-            onRemoveCurrent={handleRemoveCurrent}
-            onRemoveRenewal={handleRemoveRenewal}
-            onRemoveOption={handleRemoveOption}
-            onGenerateComparison={handleGenerateComparison}
-            isGenerating={isGenerating}
-          />
+          <div className="mt-8 flex justify-end">
+            <Button onClick={() => setStep(1)} disabled={!canProceedStep1} className="gap-2 px-6" style={{ background: canProceedStep1 ? "#0d2240" : undefined }}>
+              Continue to Enrolled Plans <ChevronRight className="w-4 h-4" />
+            </Button>
+          </div>
         </div>
-      </div>
+      )}
+
+      {step === 1 && (
+        <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-8">
+          <div className="flex items-center gap-3 mb-2">
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: "#0d2240" }}>
+              <Users className="w-5 h-5 text-white" />
+            </div>
+            <div>
+              <h2 className="text-lg font-bold" style={{ color: "#0d2240" }}>Select Enrolled Plans</h2>
+              <p className="text-sm text-gray-500">
+                Plans the client is <strong>currently enrolled in</strong> for {currentPeriod?.quarter} {currentPeriod?.year}. Select all renewing plans.
+              </p>
+            </div>
+          </div>
+          {enrolledPlans.length > 0 && (
+            <div className="flex flex-wrap gap-2 mb-4 p-3 rounded-lg bg-gray-50 border border-gray-200">
+              <span className="text-xs font-medium text-gray-500 self-center">Selected:</span>
+              {enrolledPlans.map(p => <PlanChip key={p.plan_id} plan={p} role="enrolled" onRemove={() => toggleEnrolled(p)} />)}
+            </div>
+          )}
+          <div className="relative mb-4">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+            <Input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by plan name..." className="pl-9" />
+          </div>
+          {loadingPlans ? (
+            <div className="flex items-center justify-center py-16 text-gray-400"><Loader2 className="w-5 h-5 animate-spin mr-2" />Loading plans...</div>
+          ) : enrolledCandidates.length === 0 ? (
+            <div className="text-center py-16 text-gray-400">
+              <Circle className="w-10 h-10 mx-auto mb-3 opacity-30" />
+              <p className="font-medium">No plans found for {currentPeriod?.quarter} {currentPeriod?.year}</p>
+              <p className="text-sm mt-1">Upload rate PDFs in the Data Input tab first, then come back here.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-[460px] overflow-y-auto pr-1">
+              {enrolledCandidates.map(plan => (
+                <PlanCard key={plan.plan_id} plan={plan} selected={enrolledIds.has(plan.plan_id)} onToggle={() => toggleEnrolled(plan)} role="enrolled" />
+              ))}
+            </div>
+          )}
+          {enrolledPlans.length > 0 && renewalPeriod && (
+            <div className="mt-4 p-3 rounded-lg border" style={{ background: renewalIds.size === enrolledIds.size ? "#f0fdf4" : "#fffbeb", borderColor: renewalIds.size === enrolledIds.size ? "#86efac" : "#fcd34d" }}>
+              <div className="flex items-center gap-2">
+                {renewalIds.size === enrolledIds.size ? <CheckCircle2 className="w-4 h-4 text-green-600" /> : <Circle className="w-4 h-4 text-amber-500" />}
+                <span className="text-sm font-medium" style={{ color: renewalIds.size === enrolledIds.size ? "#166534" : "#92400e" }}>
+                  {renewalIds.size} of {enrolledIds.size} plans auto-matched to {renewalPeriod.quarter} {renewalPeriod.year} renewal rates
+                </span>
+              </div>
+              {renewalIds.size < enrolledIds.size && (
+                <p className="text-xs text-amber-700 mt-1 ml-6">{enrolledIds.size - renewalIds.size} plan(s) not found in renewal period — upload renewal rate PDFs in Data Input.</p>
+              )}
+            </div>
+          )}
+          <div className="mt-6 flex justify-between">
+            <Button variant="outline" onClick={() => setStep(0)}>Back</Button>
+            <Button onClick={() => { setSearch(""); setStep(2); }} disabled={!canProceedStep2} className="gap-2 px-6" style={{ background: canProceedStep2 ? "#0d2240" : undefined }}>
+              Continue to Options <ChevronRight className="w-4 h-4" />
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {step === 2 && (
+        <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-8">
+          <div className="flex items-center gap-3 mb-2">
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: "#c9a84c" }}>
+              <Building2 className="w-5 h-5 text-white" />
+            </div>
+            <div>
+              <h2 className="text-lg font-bold" style={{ color: "#0d2240" }}>Select Option Plans</h2>
+              <p className="text-sm text-gray-500">
+                <strong>Alternative plans</strong> to show as options for {renewalPeriod?.quarter} {renewalPeriod?.year}. These appear in the Opts columns of the grid.
+              </p>
+            </div>
+          </div>
+          {optionPlans.length > 0 ? (
+            <div className="flex flex-wrap gap-2 mb-4 p-3 rounded-lg bg-gray-50 border border-gray-200">
+              <span className="text-xs font-medium text-gray-500 self-center">Selected:</span>
+              {optionPlans.map(p => <PlanChip key={p.plan_id} plan={p} role="option" onRemove={() => toggleOption(p)} />)}
+            </div>
+          ) : (
+            <div className="mb-4 p-3 rounded-lg bg-amber-50 border border-amber-200">
+              <p className="text-xs text-amber-700"><strong>Optional:</strong> Skip this step if you don't want alternative plan options in the grid.</p>
+            </div>
+          )}
+          <div className="relative mb-4">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+            <Input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by plan name..." className="pl-9" />
+          </div>
+          {loadingPlans ? (
+            <div className="flex items-center justify-center py-16 text-gray-400"><Loader2 className="w-5 h-5 animate-spin mr-2" />Loading plans...</div>
+          ) : optionCandidates.length === 0 ? (
+            <div className="text-center py-16 text-gray-400">
+              <Circle className="w-10 h-10 mx-auto mb-3 opacity-30" />
+              <p className="font-medium">No plans found for {renewalPeriod?.quarter} {renewalPeriod?.year}</p>
+              <p className="text-sm mt-1">Upload renewal rate PDFs in the Data Input tab first.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-[460px] overflow-y-auto pr-1">
+              {optionCandidates.map(plan => (
+                <PlanCard key={plan.plan_id} plan={plan} selected={optionIds.has(plan.plan_id)} onToggle={() => toggleOption(plan)} role="option" />
+              ))}
+            </div>
+          )}
+          <div className="mt-6 flex justify-between">
+            <Button variant="outline" onClick={() => { setSearch(""); setStep(1); }}>Back</Button>
+            <Button onClick={() => setStep(3)} className="gap-2 px-6" style={{ background: "#0d2240" }}>
+              Continue to Generate <ChevronRight className="w-4 h-4" />
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {step === 3 && (
+        <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-8">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: "#0d2240" }}>
+              <FileSpreadsheet className="w-5 h-5 text-white" />
+            </div>
+            <div>
+              <h2 className="text-lg font-bold" style={{ color: "#0d2240" }}>Review & Generate</h2>
+              <p className="text-sm text-gray-500">Review your selections and generate the Marketing Renewal Comparison grid</p>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
+            <div className="rounded-xl border border-gray-200 p-4">
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Renewal Period</p>
+              <p className="text-2xl font-bold" style={{ color: "#0d2240" }}>{renewalPeriod?.quarter} {renewalPeriod?.year}</p>
+              <p className="text-sm text-gray-500 mt-1">vs {currentPeriod?.quarter} {currentPeriod?.year} (current)</p>
+              <div className="mt-2 flex flex-wrap gap-1">
+                {Array.from(selectedCarriers).map(c => {
+                  const style = getCarrierStyle(c);
+                  return <span key={c} className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: style.bg, color: style.text }}>{c}</span>;
+                })}
+              </div>
+            </div>
+            <div className="rounded-xl border border-gray-200 p-4">
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Enrolled Plans</p>
+              <p className="text-2xl font-bold" style={{ color: "#0d2240" }}>{enrolledPlans.length}</p>
+              <p className="text-sm text-gray-500 mt-1">{renewalIds.size} renewal matches found</p>
+              <div className="mt-2 space-y-1">
+                {enrolledPlans.slice(0, 3).map(p => <p key={p.plan_id} className="text-xs text-gray-600 truncate">• {p.plan_name}</p>)}
+                {enrolledPlans.length > 3 && <p className="text-xs text-gray-400">+{enrolledPlans.length - 3} more</p>}
+              </div>
+            </div>
+            <div className="rounded-xl border border-gray-200 p-4">
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Option Plans</p>
+              <p className="text-2xl font-bold" style={{ color: "#c9a84c" }}>{optionPlans.length}</p>
+              <p className="text-sm text-gray-500 mt-1">{optionPlans.length === 0 ? "None selected" : "alternative plans"}</p>
+              <div className="mt-2 space-y-1">
+                {optionPlans.slice(0, 3).map(p => <p key={p.plan_id} className="text-xs text-gray-600 truncate">• {p.plan_name}</p>)}
+                {optionPlans.length > 3 && <p className="text-xs text-gray-400">+{optionPlans.length - 3} more</p>}
+              </div>
+            </div>
+          </div>
+          {renewalIds.size < enrolledIds.size && (
+            <div className="mb-4 p-3 rounded-lg bg-amber-50 border border-amber-200">
+              <p className="text-sm text-amber-700">⚠️ {enrolledIds.size - renewalIds.size} enrolled plan(s) don't have renewal rate matches. The grid will be generated with available data.</p>
+            </div>
+          )}
+          <div className="flex flex-col items-center gap-3 py-4">
+            <Button
+              onClick={handleGenerate}
+              disabled={isGenerating || (enrolledIds.size === 0 && optionIds.size === 0)}
+              className="gap-3 px-10 py-4 text-base h-auto"
+              style={{ background: "#0d2240" }}
+            >
+              {isGenerating ? <><Loader2 className="w-5 h-5 animate-spin" />Generating...</> : <><Download className="w-5 h-5" />Generate Marketing Grid</>}
+            </Button>
+            <p className="text-xs text-gray-400">Downloads as .xlsx — ready for client presentation</p>
+          </div>
+          <div className="mt-4 flex justify-start">
+            <Button variant="outline" onClick={() => setStep(2)}>Back</Button>
+          </div>
+        </div>
+      )}
+
+      {step > 0 && (
+        <div className="mt-4 flex items-center gap-4 text-xs text-gray-500 px-2">
+          <span><strong style={{ color: "#0d2240" }}>{renewalPeriod?.quarter} {renewalPeriod?.year}</strong> renewal</span>
+          <ChevronRight className="w-3 h-3" />
+          <span>{Array.from(selectedCarriers).join(", ")}</span>
+          {enrolledIds.size > 0 && <><ChevronRight className="w-3 h-3" /><span><strong>{enrolledIds.size}</strong> enrolled plan{enrolledIds.size !== 1 ? "s" : ""}</span></>}
+          {optionIds.size > 0 && <><ChevronRight className="w-3 h-3" /><span><strong>{optionIds.size}</strong> option{optionIds.size !== 1 ? "s" : ""}</span></>}
+          <button
+            onClick={() => { setStep(0); setEnrolledIds(new Set()); setOptionIds(new Set()); setSelectedCarriers(new Set()); setRenewalDate(""); }}
+            className="ml-auto text-gray-400 hover:text-gray-600 underline"
+          >
+            Start over
+          </button>
+        </div>
+      )}
     </div>
   );
 }
