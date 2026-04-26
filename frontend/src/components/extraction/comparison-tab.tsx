@@ -191,7 +191,8 @@ export function ComparisonTab() {
   const enrolledCandidates = useMemo(() => {
     return allPlans.filter((p) => {
       if (selectedCarriers.size > 0 && !Array.from(selectedCarriers).some(c => p.carrier.toUpperCase().includes(c.toUpperCase()))) return false;
-      if (currentPeriod && (p.year !== currentPeriod.year || p.quarter !== currentPeriod.quarter)) return false;
+      // Filter by quarter only — not year — so future renewal dates still show available plans
+      if (currentPeriod && p.quarter !== currentPeriod.quarter) return false;
       if (search && !p.plan_name.toLowerCase().includes(search.toLowerCase())) return false;
       return true;
     });
@@ -199,12 +200,13 @@ export function ComparisonTab() {
 
   const optionCandidates = useMemo(() => {
     return allPlans.filter((p) => {
-      if (selectedCarriers.size > 0 && !Array.from(selectedCarriers).some(c => p.carrier.toUpperCase().includes(c.toUpperCase()))) return false;
-      if (renewalPeriod && (p.year !== renewalPeriod.year || p.quarter !== renewalPeriod.quarter)) return false;
+      // Options show ALL carriers — not filtered by selected renewal carriers
+      // Filter by quarter only so future renewal dates work
+      if (renewalPeriod && p.quarter !== renewalPeriod.quarter) return false;
       if (search && !p.plan_name.toLowerCase().includes(search.toLowerCase())) return false;
       return true;
     });
-  }, [allPlans, selectedCarriers, renewalPeriod, search]);
+  }, [allPlans, renewalPeriod, search]);
 
   const enrolledPlans = useMemo(() => allPlans.filter(p => enrolledIds.has(p.plan_id)), [allPlans, enrolledIds]);
   const optionPlans = useMemo(() => allPlans.filter(p => optionIds.has(p.plan_id)), [allPlans, optionIds]);
@@ -352,7 +354,7 @@ export function ComparisonTab() {
             <div>
               <h2 className="text-lg font-bold" style={{ color: "#0d2240" }}>Select Enrolled Plans</h2>
               <p className="text-sm text-gray-500">
-                Plans the client is <strong>currently enrolled in</strong> for {currentPeriod?.quarter} {currentPeriod?.year}. Select all renewing plans.
+                Plans the client is <strong>currently enrolled in</strong>. Showing all {currentPeriod?.quarter} plans — select the ones renewing.
               </p>
             </div>
           </div>
@@ -371,7 +373,7 @@ export function ComparisonTab() {
           ) : enrolledCandidates.length === 0 ? (
             <div className="text-center py-16 text-gray-400">
               <Circle className="w-10 h-10 mx-auto mb-3 opacity-30" />
-              <p className="font-medium">No plans found for {currentPeriod?.quarter} {currentPeriod?.year}</p>
+              <p className="font-medium">No plans found for {currentPeriod?.quarter}</p>
               <p className="text-sm mt-1">Upload rate PDFs in the Data Input tab first, then come back here.</p>
             </div>
           ) : (
