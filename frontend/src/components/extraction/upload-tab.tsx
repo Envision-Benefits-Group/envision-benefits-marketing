@@ -290,7 +290,10 @@ export function UploadTab({ onIngestionComplete }: UploadTabProps) {
           </div>
           <Progress value={progress} className="h-2" />
           <p className="text-xs text-gray-400 text-center">
-            Processing {files.length} file{files.length > 1 ? "s" : ""} in parallel
+            Processing {files.length} file{files.length > 1 ? "s" : ""} — large files may take 3-5 minutes. Do not close this tab.
+          </p>
+          <p className="text-xs text-center font-medium" style={{ color: "#c9a84c" }}>
+            ⏳ Still working... the AI is reading and extracting all plans from the PDF
           </p>
         </div>
       )}

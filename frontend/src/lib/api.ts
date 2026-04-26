@@ -136,6 +136,7 @@ export const extractionApi = {
         "Content-Type": "multipart/form-data",
         "x-api-key": process.env.NEXT_PUBLIC_API_KEY || "test-secret-key",
       },
+      timeout: 600000, // 10 minutes — large rate PDFs need time to process
     });
   },
   ingestBenefits: (files: File[], year?: string) => {
