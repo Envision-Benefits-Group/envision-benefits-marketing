@@ -147,6 +147,7 @@ export const extractionApi = {
         "Content-Type": "multipart/form-data",
         "x-api-key": process.env.NEXT_PUBLIC_API_KEY || "test-secret-key",
       },
+      timeout: 120000, // 2 minutes per file
     });
   },
 };
