@@ -309,7 +309,7 @@ export function UploadTab({ onIngestionComplete }: UploadTabProps) {
           <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg flex items-center gap-3">
             <CheckCircle2 className="w-5 h-5 shrink-0" />
             <div>
-              {result.background ? (
+              {result?.background ? (
                 <>
                   <p className="font-semibold">Files submitted for processing</p>
                   <p className="text-sm opacity-90">
@@ -320,8 +320,8 @@ export function UploadTab({ onIngestionComplete }: UploadTabProps) {
                 <>
                   <p className="font-semibold">Ingestion Complete</p>
                   <p className="text-sm opacity-90">
-                    {result.total_plans_ingested} plan{result.total_plans_ingested !== 1 ? "s" : ""} ingested from{" "}
-                    {result.total_files} file{result.total_files !== 1 ? "s" : ""}
+                    {result?.total_plans_ingested ?? 0} plan{(result?.total_plans_ingested ?? 0) !== 1 ? "s" : ""} ingested from{" "}
+                    {result?.total_files ?? 0} file{(result?.total_files ?? 0) !== 1 ? "s" : ""}
                   </p>
                 </>
               )}
