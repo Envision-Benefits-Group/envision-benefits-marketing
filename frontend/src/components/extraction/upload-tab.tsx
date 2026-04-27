@@ -327,7 +327,7 @@ export function UploadTab({ onIngestionComplete }: UploadTabProps) {
               )}
             </div>
           </div>
-          {result.files.map((fileResult) => (
+          {result?.files?.map((fileResult) => (
             <Card key={fileResult.file} className="shadow-sm">
               <CardContent className="pt-4 pb-4">
                 <div className="flex items-center justify-between mb-3">
