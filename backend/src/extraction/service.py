@@ -149,12 +149,17 @@ STRICT COMPLIANCE RULES:
     - "Excellus Rochester Gold 14" → "Roch Gold 14"
     - "Excellus Syracuse Silver 2" → "Syr Silver 2"
     - "Excellus Utica Platinum 2" → "Utica Platinum 2"
+    - "Excellus Albany/Mid-Hudson/Utica Gold 14" → "Utica Gold 14"
     Rules:
     - Strip carrier name prefix from plan_name (the carrier is already in the carrier field)
     - Remove HIOS ID, Plan ID, or any parenthetical ID suffixes
     - If two plans have identical rates and benefits but slightly different names (e.g. one has an ID suffix), they are the SAME plan — extract only once
     - Keep metal tier (Platinum/Gold/Silver/Bronze), network type (POS/PPO/EPO), and plan variant identifiers (Classic, Plus, EX, Apex, HSAQ, Option 2, etc.)
-    - EXCELLUS REGION — CRITICAL: Excellus plans have different rates by region (Rochester, Syracuse, Utica). You MUST preserve the region in the plan name. Use these prefixes: "Roch" for Rochester, "Syr" for Syracuse, "Utica" for Utica. If the document title or header indicates a region, prepend it to every plan name. Example: a Rochester rate document with "Gold 14" → "Roch Gold 14". If no region is identifiable, use the plan name as-is.
+    - EXCELLUS REGION — CRITICAL: Excellus plans have different rates by region. You MUST prefix every Excellus plan name with the region using ONLY these exact prefixes:
+      * "Roch" for Rochester region
+      * "Syr" for Syracuse region  
+      * "Utica" for Utica region (also covers Albany/Mid-Hudson/Utica — always normalize to just "Utica")
+      If the document title or header indicates a region, prepend it to every plan name. Example: a Rochester rate document with "Gold 14" → "Roch Gold 14". Never use the full region name like "Albany/Mid-Hudson/Utica" — always shorten to "Utica".
 
 13. IHA ACTIVATE PLANS — BENEFIT ALLOWANCE (FIRST DOLLAR COVERAGE):
     IHA "Activate" plans include a Benefit Allowance that applies BEFORE the deductible. This may appear as "First Dollar Coverage", "Benefit Allowance", or a dollar amount shown above the deductible in the benefit summary.
